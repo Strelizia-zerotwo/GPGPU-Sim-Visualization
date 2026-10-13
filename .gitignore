@@ -1,0 +1,7 @@
+node_modules/
+release/
+artifacts/
+__pycache__/
+*.pyc
+*.log
+.studio-data/

@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GPGPU Studio</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="modules.css" />
+    <link rel="stylesheet" href="canvas.css" />
+  </head>
+  <body class="canvas-view">
+    <div class="titlebar">
+      <span class="title-dot"></span>GPGPU Studio<span class="title-label"
+        >GPU 架构实验</span
+      >
+    </div>
+    <div class="app-layout">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">G</div>
+          <div>
+            <strong>GPGPU Studio</strong><small>EXPERIMENT WORKSPACE</small>
+          </div>
+        </div>
+        <div class="nav-label">工作空间</div>
+        <nav>
+          <button class="nav-item active" data-view="workbench">
+            <span class="nav-icon">▦</span>实验工作台
+          </button>
+          <button class="nav-item" data-view="results">
+            <span class="nav-icon">▤</span>运行与结果<span
+              class="nav-count"
+              id="nav-count"
+              >0</span
+            >
+          </button>
+          <button class="nav-item" data-view="environment">
+            <span class="nav-icon">⚙</span>环境设置
+          </button>
+          <button class="nav-item" data-view="store">
+            <span class="nav-icon">▧</span>PolyBench 商店
+          </button>
+          <button class="nav-item" data-view="tutorial">
+            <span class="nav-icon">?</span>部署教程
+          </button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="backend-status">
+            <span class="status-dot" id="env-dot"></span
+            ><strong id="backend-label">检测后端中</strong>
+          </div>
+          <p id="sidebar-env">接入已有模拟器环境</p>
+          <div class="local-label">
+            本地实验 · v<span id="version">0.1.0</span>
+          </div>
+        </div>
+      </aside>
+      <main>
+        <header class="page-header">
+          <div>
+            <div class="eyebrow">GPGPU-SIM / WORKSPACE</div>
+            <h1 id="page-title">实验工作台</h1>
+            <p id="page-description">
+              选择程序、规模和 GPU 配置，一次启动多个实验。
+            </p>
+          </div>
+          <div class="header-status" id="header-status">环境检测中…</div>
+        </header>
+        <section id="view-workbench" class="view">
+          <div class="environment-notice" id="environment-notice" hidden>
+            <span>先接入 CUDA 和 GPGPU-Sim，完成检测后即可创建实验。</span
+            ><button class="text-button" id="go-environment">设置环境 →</button>
+          </div>
+          <div class="canvas-toolbar">
+            <div class="canvas-add-buttons"><button class="primary" id="add-benchmark-node">＋ 添加测试程序</button><button class="secondary" id="add-gpu-node">＋ 添加 GPU</button><button class="text-button" id="go-store">程序商店 ↗</button></div>
+            <div class="canvas-tools"><button id="canvas-connect" class="secondary" aria-pressed="false">⌁ 连线</button><button id="canvas-fit" class="secondary">适应画布</button><button id="canvas-settings-button" class="secondary">执行设置</button></div>
+          </div>
+          <div class="canvas-layout">
+            <section class="canvas-panel"><div class="canvas-heading"><div><span class="canvas-live-dot"></span><strong>实验画布</strong><span id="canvas-count">0 个模块 · 0 条连接</span></div><span id="canvas-mode-hint">拖动方块 · 拖动空白平移 · 滚轮缩放</span></div>
+              <div class="canvas-viewport" id="canvas-viewport" tabindex="0" aria-label="实验画布"><div class="canvas-scene" id="canvas-scene"><svg id="canvas-lines" aria-hidden="true"></svg><div id="canvas-nodes"></div><div id="canvas-edge-actions"></div></div><div class="canvas-empty" id="canvas-empty"><div class="empty-workflow"><span>▦</span><i>···</i><span>▧</span></div><h2>从一个实验开始</h2><p>在上方添加测试程序和 GPU，<br>连接两个方块，便可开始运行。</p><button class="secondary" id="canvas-empty-add">＋ 添加测试程序</button></div><div class="canvas-zoom"><button id="canvas-zoom-out" aria-label="缩小画布">−</button><span id="canvas-zoom-value">100%</span><button id="canvas-zoom-in" aria-label="放大画布">＋</button></div></div>
+              <div class="canvas-footer"><span id="canvas-selection-hint">点击方块编辑参数，点击两侧圆点连接。</span><span>运行按钮右键可设置重复次数</span></div>
+            </section>
+            <aside class="canvas-side"><section class="panel canvas-summary"><div class="eyebrow">EXPERIMENT CONNECTIONS</div><h2>实验连接</h2><div class="canvas-plan-number"><strong id="task-count">0</strong><span>个计划任务</span></div><p id="plan-formula">添加模块并连线</p><div id="canvas-connection-list"></div><p class="plan-validation" id="plan-validation" hidden></p><button class="primary" id="launch" disabled>▶ 运行全部就绪连接</button><div class="canvas-environment"><span class="status-dot" id="summary-dot"></span><div><strong id="summary-cuda">环境待接入</strong><small id="summary-sim">GPGPU-Sim</small></div></div></section><p class="canvas-side-note">每条连接对应一个程序与 GPU 组合，分别保存配置、日志和结果。可以同时运行多条连接。</p></aside>
+          </div>
+          <div hidden><div id="benchmark-list"></div><div id="profile-list"></div><span id="profile-count"></span><button id="add-gpu"></button><span id="summary-bench"></span><span id="summary-size"></span><span id="summary-gpu"></span><span id="summary-concurrency"></span><input id="repeats" value="1"></div>
+        </section>
+        <section id="view-results" class="view" hidden>
+          <div class="results-summary">
+            <div><span>全部实验</span><strong id="stat-total">0</strong></div>
+            <div><span>正在执行</span><strong id="stat-running">0</strong></div>
+            <div>
+              <span>已完成并通过检查</span
+              ><strong id="stat-completed">0</strong>
+            </div>
+            <div>
+              <span>需要查看</span><strong id="stat-attention">0</strong>
+            </div>
+          </div>
+          <div class="panel result-panel">
+            <div class="panel-heading">
+              <div>
+                <h2>实验记录</h2>
+                <span class="subtle">点击任务查看日志和实际配置</span>
+              </div>
+              <button class="secondary" id="export-csv">导出 CSV ↗</button>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>测试程序 / 规模</th>
+                    <th>GPU 配置</th>
+                    <th>状态</th>
+                    <th>正确性</th>
+                    <th>模拟周期</th>
+                    <th>IPC</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="job-table"></tbody>
+              </table>
+            </div>
+            <div class="empty-state" id="jobs-empty">
+              <div class="empty-icon">▤</div>
+              <h3>你的实验记录会出现在这里</h3>
+              <p>从工作台选择程序和配置，启动第一组实验。</p>
+              <button class="secondary" id="new-experiment">创建实验 →</button>
+            </div>
+          </div>
+          <div class="comparison panel">
+            <div class="panel-heading">
+              <div>
+                <h2>配置比较</h2>
+                <span class="subtle"
+                  >同一程序与规模 · 仅比较完整且正确的结果</span
+                >
+              </div>
+              <select id="compare-group">
+                <option value="">暂无可比较结果</option>
+              </select>
+            </div>
+            <div id="comparison-chart" class="comparison-chart"></div>
+            <p class="helper comparison-note">
+              柱长表示模拟执行时间（周期 ÷
+              配置核心频率）；实验等待时间单独记录。数据来自模拟器，并非真实 GPU
+              测量。
+            </p>
+          </div>
+        </section>
+        <section id="view-environment" class="view" hidden>
+          <div class="onboarding-banner">
+            <div>
+              <strong>首次打开会自动检测已有环境</strong>
+              <p>
+                检测 WSL、CUDA
+                和常用项目目录。已有安装可直接接入；缺少源码时使用下面的一键部署。
+              </p>
+            </div>
+            <button class="secondary" id="auto-detect">重新自动检测</button>
+          </div>
+          <div class="env-grid">
+            <section class="panel">
+              <div class="panel-heading">
+                <div><h2>连接运行环境</h2></div>
+                <span class="subtle">已有安装</span>
+              </div>
+              <form id="environment-form" class="environment-form">
+                <label for="distro">运行位置</label
+                ><select id="distro"></select>
+                <p class="helper" id="wsl-help">
+                  Windows 使用 WSL；Linux 直接在本机执行。路径填写 Linux 路径。
+                </p>
+                <label for="sim-root">GPGPU-Sim 源码目录</label
+                ><input
+                  id="sim-root"
+                  placeholder="留空自动检测，如 /home/user/projects/gpgpu-project/gpgpu-sim_distribution"
+                /><label for="apps-root">gpu-app-collection 目录</label
+                ><input
+                  id="apps-root"
+                  placeholder="留空使用模拟器同级的 gpu-app-collection"
+                /><label for="cuda-root">CUDA Toolkit 目录</label
+                ><input
+                  id="cuda-root"
+                  list="cuda-options"
+                  placeholder="留空优先使用模拟器构建所用 CUDA"
+                /><datalist id="cuda-options"></datalist
+                ><label for="runs-root">实验保存目录</label
+                ><input id="runs-root" placeholder="留空自动使用 runs/studio" />
+                <div class="env-form-actions">
+                  <button type="submit" class="primary" id="inspect-env">
+                    检测并保存环境</button
+                  ><button type="button" class="secondary" id="install-help">
+                    查看部署教程
+                  </button>
+                </div>
+              </form>
+            </section>
+            <aside>
+              <section class="panel env-report">
+                <div class="panel-heading">
+                  <h2>环境检查</h2>
+                  <span class="badge neutral" id="environment-badge"
+                    >待检测</span
+                  >
+                </div>
+                <div id="environment-report">
+                  <p class="helper">
+                    检查 CUDA、模拟器运行库、benchmark 源码与 GPU 配置兼容性。
+                  </p>
+                </div>
+              </section>
+              <div class="note-card">
+                <strong>CUDA 按路径选择</strong>
+                <p>
+                  实验使用所选 CUDA 和模拟器环境。不同 CUDA
+                  构建需要对应的模拟器运行库。
+                </p>
+                <strong>初次使用需要</strong>
+                <p>
+                  Windows：WSL、Linux 发行版和 Python 3。<br />后端：已安装的
+                  CUDA、已编译的 GPGPU-Sim、PolyBench CUDA 源码。
+                </p>
+              </div>
+            </aside>
+          </div>
+          <section class="panel deploy-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="step">↓</span>
+                <h2>一键部署 GPGPU-Sim</h2>
+              </div>
+              <span class="subtle">下载官方源码 → CMake 编译 → 安装运行库</span>
+            </div>
+            <div class="deploy-content">
+              <p id="deploy-guidance">
+                先自动检测 WSL 与
+                CUDA，再选择部署位置。编译依赖的安装命令在部署教程中。
+              </p>
+              <div class="deploy-options">
+                <div>
+                  <label for="build-jobs">编译并行数</label
+                  ><input
+                    id="build-jobs"
+                    type="number"
+                    min="1"
+                    max="16"
+                    value="2"
+                  />
+                </div>
+                <label class="checkbox-label"
+                  ><input type="checkbox" id="install-gemm" checked />部署后下载
+                  GEMM</label
+                ><button class="primary" id="deploy-simulator">
+                  一键下载并编译</button
+                ><button class="secondary" id="deploy-tutorial">
+                  准备依赖 / 查看教程
+                </button>
+              </div>
+              <small class="field-hint"
+                >新部署使用已核验的官方提交 c3eeb6d1；已有源码使用当前版本。CUDA
+                使用上方选定的目录。</small
+              >
+            </div>
+          </section>
+        </section>
+        <section id="view-store" class="view" hidden>
+          <div class="store-toolbar">
+            <div>
+              <input id="store-search" placeholder="搜索程序名称或算法…" /><span
+                class="subtle"
+                id="store-count"
+                >PolyBench/GPU CUDA · 15 个程序</span
+              >
+            </div>
+            <div>
+              <button class="secondary" id="add-custom">
+                添加自己的程序 ＋</button
+              ><button class="primary" id="download-selected">
+                下载所选程序
+              </button>
+            </div>
+          </div>
+          <div class="store-source">
+            <strong>PolyBench/GPU 1.0 CUDA 套件</strong
+            ><span>来源：GitHub / accel-sim / gpu-app-collection</span
+            ><button class="text-button" id="select-store-all">
+              选择全部未下载
+            </button>
+          </div>
+          <div id="store-grid" class="store-grid"></div>
+          <p class="helper">
+            “已下载”表示源码可用。编译与数值正确性会在实际运行时检查；不同程序的规模宏在卡片中列出。
+          </p>
+        </section>
+        <section id="view-tutorial" class="view" hidden>
+          <div class="onboarding-banner">
+            <div>
+              <strong id="tutorial-detection">按照缺少的环节准备环境</strong>
+              <p>
+                WSL 首次安装需要 Windows
+                管理员权限和可能的重启；后续实验在桌面窗口中操作。
+              </p>
+            </div>
+            <button class="secondary" id="tutorial-detect">
+              我已完成，重新检测
+            </button>
+          </div>
+          <div class="tutorial-grid">
+            <section class="panel tutorial-card">
+              <span class="step">01</span>
+              <h2>安装 WSL 与 Ubuntu</h2>
+              <p>
+                在 Windows 开始菜单找到
+                PowerShell，右键“以管理员身份运行”，执行下面的命令。
+              </p>
+              <pre>wsl --install -d Ubuntu</pre>
+              <button class="secondary" data-copy="wsl --install -d Ubuntu">
+                复制安装命令
+              </button>
+              <p>
+                按提示重启 Windows。第一次打开 Ubuntu 时，创建 Linux
+                用户名和密码。
+              </p>
+              <button class="text-button" id="official-wsl">
+                微软官方说明 ↗
+              </button>
+            </section>
+            <section class="panel tutorial-card">
+              <span class="step">02</span>
+              <h2>准备 Python 和编译依赖</h2>
+              <p>
+                打开 Ubuntu 终端，执行下面的命令。sudo 要求输入刚创建的 Linux
+                用户密码，输入时不会显示字符。
+              </p>
+              <pre>
+sudo apt-get update
+sudo apt-get install -y python3 git build-essential cmake bison flex zlib1g-dev libgl1-mesa-dev</pre>
+              <button
+                class="secondary"
+                data-copy="sudo apt-get update&#10;sudo apt-get install -y python3 git build-essential cmake bison flex zlib1g-dev libgl1-mesa-dev"
+              >
+                复制依赖安装命令
+              </button>
+            </section>
+            <section class="panel tutorial-card">
+              <span class="step">03</span>
+              <h2>选择 CUDA Toolkit</h2>
+              <p>
+                已有 CUDA 时，自动检测会列出版本与路径。首次安装时，按 NVIDIA 的
+                Ubuntu / WSL 指引安装 Toolkit，再回到软件重新检测。
+              </p>
+              <pre>/usr/local/cuda-12.8/bin/nvcc --version</pre>
+              <p>
+                推荐先使用本项目已经验证的 CUDA 12.8。选择 Toolkit
+                安装方式，保留其他项目正在使用的 CUDA 版本。
+              </p>
+              <button class="text-button" id="official-cuda">
+                NVIDIA 安装说明 ↗
+              </button>
+            </section>
+            <section class="panel tutorial-card">
+              <span class="step">04</span>
+              <h2>部署模拟器并下载程序</h2>
+              <p>
+                回到“环境设置”，确认 Linux 部署目录和 CUDA
+                路径，点击“一键下载并编译”。完成后进入 PolyBench
+                商店，选择需要的程序下载。
+              </p>
+              <p>
+                先用单个 GEMM、规模 8、重复 1
+                次验证运行；确认通过后再增加规模与并发。
+              </p>
+              <button class="primary" id="tutorial-to-env">
+                打开环境设置 →
+              </button>
+            </section>
+          </div>
+        </section>
+        <section class="panel maintenance-panel" id="maintenance-panel" hidden>
+          <div class="panel-heading">
+            <div>
+              <h2 id="maintenance-title">部署 / 下载日志</h2>
+              <span class="badge active" id="maintenance-status">准备中</span>
+            </div>
+            <button class="secondary" id="cancel-maintenance">取消操作</button>
+          </div>
+          <pre id="maintenance-log"></pre>
+          <p class="helper" id="maintenance-error"></p>
+        </section>
+      </main>
+    </div>
+    <dialog id="canvas-picker"><div class="dialog-heading"><div><div class="eyebrow">MODULE LIBRARY</div><h2 id="canvas-picker-title">添加模块</h2></div><button class="icon-button" id="close-canvas-picker" aria-label="关闭">✕</button></div><input id="canvas-picker-search" placeholder="搜索模块…" aria-label="搜索模块"><div class="canvas-picker-list" id="canvas-picker-list"></div><p class="helper">每次添加都会创建一个独立方块，可以设置不同参数。</p></dialog>
+    <dialog id="canvas-settings"><div class="dialog-heading"><h2>执行设置</h2><button class="icon-button" id="close-canvas-settings" aria-label="关闭">✕</button></div><div class="canvas-settings-fields"><label>最大并发数<input id="concurrency" type="number" min="1" max="32" value="1"><small>所有连接共用执行槽位；1 为顺序运行</small></label><label>每个任务时间上限 / 分钟<input id="wall-minutes" type="number" min="1" max="10080" value="30"></label><label>最大模拟周期<input id="max-cycles" type="number" min="0" value="0"><small>0 为不限制</small></label><label>新程序默认规模<input id="sizes" value="16"><small>添加后的每个方块可单独修改</small></label></div><div class="dialog-actions"><span class="helper">每条连接的重复次数在运行按钮右键菜单中设置。</span><button class="primary" id="save-canvas-settings">完成</button></div></dialog>
+    <div id="canvas-context" role="menu" hidden><strong id="canvas-context-title">实验设置</strong><div class="context-repeat"><label for="edge-repeats">运行次数</label><input id="edge-repeats" type="number" min="1" max="100" value="1"></div><div class="context-presets"><button data-edge-repeat="1">1 次</button><button data-edge-repeat="3">3 次</button><button data-edge-repeat="5">5 次</button><button data-edge-repeat="10">10 次</button></div><button id="save-edge-repeat">保存次数</button><button id="context-run-edge">▶ 开始运行</button><button id="context-stop-edge">停止本次运行</button><button id="context-result-edge">查看本次结果</button><button id="context-remove-edge" class="danger">删除连接</button></div>
+    <dialog id="config-dialog">
+      <div class="dialog-heading">
+        <div>
+          <div class="eyebrow">GPU ARCHITECTURE / MODULE EDITOR</div>
+          <h2 id="config-title">编辑配置</h2>
+        </div>
+        <button class="icon-button" id="close-config" aria-label="关闭">
+          ✕
+        </button>
+      </div>
+      <div class="gpu-editor-body"><p class="helper" id="gpu-provenance"></p>
+      <div id="custom-gpu-settings" class="custom-gpu-settings" hidden><div><label for="gpu-name">模块名称</label><input id="gpu-name" maxlength="80" placeholder="例如 My GPU" /></div><div><label for="gpu-template">详细参数模板</label><select id="gpu-template"></select></div><button class="secondary" id="fill-gpu-template">从模板填入模块</button><p>模板提供流水线、指令延迟和 DRAM 时序等详细参数。下方可视化模块从空白开始，填完整后可运行。</p></div>
+      <div class="gpu-editor-layout"><div class="gpu-diagram" id="gpu-diagram"></div><aside class="gpu-inspector"><div class="eyebrow">MODULE PARAMETERS</div><h3 id="gpu-module-title"></h3><p id="gpu-module-description"></p><div id="gpu-fields"></div></aside></div>
+      <div class="gpu-metrics" id="gpu-metrics"></div>
+      <div class="editor-validation" id="gpu-validation"></div>
+      <details id="gpu-advanced"><summary>查看 / 编辑完整模拟器配置</summary><p class="helper">修改文本后点击“应用文本到架构”，再保存。未展示的详细参数也会保留。</p><textarea id="config-text" spellcheck="false"></textarea><button class="secondary" id="apply-gpu-text">应用文本到架构</button></details>
+      </div>
+      <div class="dialog-actions">
+        <button class="secondary" id="reset-config">恢复基础配置</button
+        ><div class="gpu-save-actions"><button class="secondary" id="duplicate-gpu">另存为自定义 GPU</button><button class="primary" id="save-config">保存 GPU 模块</button></div>
+      </div>
+    </dialog>
+    <dialog id="benchmark-dialog"><div class="dialog-heading"><div><div class="eyebrow">BENCHMARK / MODULE EDITOR</div><h2 id="benchmark-title"></h2></div><button class="icon-button" id="close-benchmark" aria-label="关闭">✕</button></div><p id="benchmark-description" class="helper"></p><div id="benchmark-visual"></div><div class="benchmark-editor-grid"><div><label for="benchmark-sizes">这个模块的规模</label><input id="benchmark-sizes" placeholder="例如 8, 16, 32" /><p class="helper">多个规模生成多个独立实验；未指定的维度等于规模。</p></div><div id="benchmark-dimension-mode"><label for="dimension-mode">维度设置</label><select id="dimension-mode"><option value="uniform">各维度跟随规模</option><option value="independent">独立设置维度 · 单个规模</option></select></div></div><div id="benchmark-parameters"></div><div id="benchmark-args-row" hidden><label for="benchmark-args">运行参数（每行一项，{size} 替换为规模）</label><textarea id="benchmark-args"></textarea></div><p class="editor-validation" id="benchmark-validation"></p><div class="dialog-actions"><button class="secondary" id="reset-benchmark">恢复默认参数</button><button class="primary" id="save-benchmark">保存程序模块</button></div></dialog>
+    <dialog id="custom-dialog">
+      <div class="dialog-heading">
+        <div>
+          <div class="eyebrow">CUSTOM BENCHMARK</div>
+          <h2>添加自己的 CUDA 程序</h2>
+        </div>
+        <button class="icon-button" id="close-custom" aria-label="关闭">
+          ✕
+        </button>
+      </div>
+      <form id="custom-form">
+        <div class="custom-fields">
+          <div>
+            <label for="custom-name">程序名称</label
+            ><input id="custom-name" required placeholder="例如 My GEMM" />
+          </div>
+          <div>
+            <label for="custom-origin">源码来源</label
+            ><select id="custom-origin">
+              <option value="local">已有 Linux 目录</option>
+              <option value="github">公开 GitHub 仓库</option>
+            </select>
+          </div>
+          <div class="full-field" id="custom-local-row">
+            <label for="custom-root">Linux 源码目录</label
+            ><input
+              id="custom-root"
+              placeholder="/home/用户名/benchmarks/my-gemm"
+            />
+          </div>
+          <div class="full-field" id="custom-github-row" hidden>
+            <label for="custom-repo">GitHub 仓库地址</label
+            ><input
+              id="custom-repo"
+              placeholder="https://github.com/组织/仓库.git"
+            /><label for="custom-ref"
+              >分支 / 标签 / 提交（留空使用默认分支）</label
+            ><input id="custom-ref" />
+          </div>
+          <div class="full-field">
+            <label for="custom-file">CUDA 入口文件，相对于源码目录</label
+            ><input
+              id="custom-file"
+              value="main.cu"
+              required
+              placeholder="例如 CUDA/GEMM/gemm.cu"
+            />
+          </div>
+          <div>
+            <label for="custom-mode">调整规模的方式</label
+            ><select id="custom-mode">
+              <option value="macros">修改整数编译宏</option>
+              <option value="arguments">传入运行参数</option>
+            </select>
+          </div>
+          <div id="custom-macros-row">
+            <label for="custom-macros">规模宏名称，用逗号分隔</label
+            ><input id="custom-macros" value="N" placeholder="NI,NJ,NK" />
+          </div>
+          <div class="full-field" id="custom-args-row" hidden>
+            <label for="custom-args"
+              >运行参数，每行一个，规模用 {size} 表示</label
+            ><textarea id="custom-args">{size}</textarea>
+          </div>
+        </div>
+        <p class="helper">
+          选择一个含 CUDA 入口和必要头文件的源码目录。下载 /
+          添加后，在工作台编译运行；程序输出标准 PolyBench
+          比对信息时可自动判断正确性。
+        </p>
+        <div class="dialog-actions">
+          <span class="subtle">添加时会校验源码和规模设置</span
+          ><button class="primary" type="submit">添加到商店</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="job-dialog">
+      <div class="dialog-heading">
+        <div>
+          <div class="eyebrow">EXPERIMENT DETAIL</div>
+          <h2 id="job-title">任务详情</h2>
+        </div>
+        <button class="icon-button" id="close-job" aria-label="关闭">✕</button>
+      </div>
+      <div class="job-detail-summary" id="job-detail-summary"></div>
+      <div class="log-tabs">
+        <button class="active" data-artifact="sim.log">运行日志</button
+        ><button data-artifact="compile.log">编译日志</button
+        ><button data-artifact="gpgpusim.config">实际配置</button
+        ><button data-artifact="manifest.json">实验记录</button
+        ><button data-artifact="source.diff">源码差异</button
+        ><button class="folder-button" id="open-job-folder">
+          打开文件夹 ↗
+        </button>
+      </div>
+      <pre id="job-log"></pre>
+      <div class="dialog-actions">
+        <span class="subtle" id="job-workdir"></span
+        ><button class="secondary" id="refresh-log">刷新文件</button>
+      </div>
+    </dialog>
+    <div id="toast" role="status" hidden></div>
+    <script src="gpu-model.js"></script>
+    <script src="modules.js"></script>
+    <script src="graph-model.js"></script>
+    <script src="canvas.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

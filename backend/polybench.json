@@ -1,0 +1,203 @@
+{
+  "gemm": {
+    "name": "GEMM",
+    "folder": "GEMM",
+    "file": "gemm.cu",
+    "macros": [
+      "NI",
+      "NJ",
+      "NK"
+    ],
+    "description": "矩阵乘法 · M × N × K",
+    "minSize": 1,
+    "kind": "builtin",
+    "mode": "macros"
+  },
+  "mvt": {
+    "name": "MVT",
+    "folder": "MVT",
+    "file": "mvt.cu",
+    "macros": [
+      "N"
+    ],
+    "description": "矩阵向量乘法 · 两个 kernel",
+    "minSize": 1,
+    "kind": "builtin",
+    "mode": "macros"
+  },
+  "2mm": {
+    "name": "2MM",
+    "folder": "2MM",
+    "file": "2mm.cu",
+    "macros": [
+      "NI",
+      "NJ",
+      "NK",
+      "NL"
+    ],
+    "description": "两次矩阵乘法",
+    "minSize": 1,
+    "kind": "builtin",
+    "mode": "macros"
+  },
+  "3mm": {
+    "name": "3MM",
+    "folder": "3MM",
+    "file": "3mm.cu",
+    "macros": [
+      "NI",
+      "NJ",
+      "NK",
+      "NL",
+      "NM"
+    ],
+    "description": "三次矩阵乘法",
+    "minSize": 1,
+    "kind": "builtin",
+    "mode": "macros"
+  },
+  "2dconv": {
+    "name": "2DCONV",
+    "folder": "2DCONV",
+    "file": "2DConvolution.cu",
+    "macros": [
+      "NI",
+      "NJ"
+    ],
+    "description": "二维卷积 · NI = NJ",
+    "minSize": 3,
+    "kind": "builtin",
+    "mode": "macros"
+  },
+  "3dconv": {
+    "name": "3DCONV",
+    "folder": "3DCONV",
+    "file": "3DConvolution.cu",
+    "macros": [
+      "NI",
+      "NJ",
+      "NK"
+    ],
+    "description": "三维卷积 · NI = NJ = NK",
+    "minSize": 3,
+    "kind": "builtin",
+    "mode": "macros"
+  },
+  "atax": {
+    "name": "ATAX",
+    "folder": "ATAX",
+    "file": "atax.cu",
+    "macros": [
+      "NX",
+      "NY"
+    ],
+    "description": "矩阵转置与向量乘法",
+    "minSize": 1,
+    "kind": "builtin",
+    "mode": "macros"
+  },
+  "bicg": {
+    "name": "BICG",
+    "folder": "BICG",
+    "file": "bicg.cu",
+    "macros": [
+      "NX",
+      "NY"
+    ],
+    "description": "双共轭梯度的矩阵向量操作",
+    "minSize": 1,
+    "kind": "builtin",
+    "mode": "macros"
+  },
+  "corr": {
+    "name": "CORR",
+    "folder": "CORR",
+    "file": "correlation.cu",
+    "macros": [
+      "M",
+      "N"
+    ],
+    "description": "相关系数矩阵",
+    "minSize": 1,
+    "kind": "builtin",
+    "mode": "macros"
+  },
+  "covar": {
+    "name": "COVAR",
+    "folder": "COVAR",
+    "file": "covariance.cu",
+    "macros": [
+      "M",
+      "N"
+    ],
+    "description": "协方差矩阵",
+    "minSize": 1,
+    "kind": "builtin",
+    "mode": "macros"
+  },
+  "fdtd2d": {
+    "name": "FDTD-2D",
+    "folder": "FDTD-2D",
+    "file": "fdtd2d.cu",
+    "macros": [
+      "NX",
+      "NY",
+      "tmax"
+    ],
+    "description": "二维有限差分 · NX = NY = 时间步数",
+    "minSize": 1,
+    "kind": "builtin",
+    "mode": "macros"
+  },
+  "gesummv": {
+    "name": "GESUMMV",
+    "folder": "GESUMMV",
+    "file": "gesummv.cu",
+    "macros": [
+      "N"
+    ],
+    "description": "两个矩阵向量积的加权和",
+    "minSize": 1,
+    "kind": "builtin",
+    "mode": "macros"
+  },
+  "gramschm": {
+    "name": "GRAMSCHM",
+    "folder": "GRAMSCHM",
+    "file": "gramschmidt.cu",
+    "macros": [
+      "M",
+      "N"
+    ],
+    "description": "Gram-Schmidt 正交化",
+    "minSize": 1,
+    "kind": "builtin",
+    "mode": "macros"
+  },
+  "syr2k": {
+    "name": "SYR2K",
+    "folder": "SYR2K",
+    "file": "syr2k.cu",
+    "macros": [
+      "N",
+      "M"
+    ],
+    "description": "对称矩阵秩 2k 更新",
+    "minSize": 1,
+    "kind": "builtin",
+    "mode": "macros"
+  },
+  "syrk": {
+    "name": "SYRK",
+    "folder": "SYRK",
+    "file": "syrk.cu",
+    "macros": [
+      "N",
+      "M"
+    ],
+    "description": "对称矩阵秩 k 更新",
+    "minSize": 1,
+    "kind": "builtin",
+    "mode": "macros"
+  }
+}
