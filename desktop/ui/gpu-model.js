@@ -10,7 +10,7 @@
     { id: "shared", title: "Shared Memory", subtitle: "每个 SM 的共享存储", icon: "▥" },
     { id: "network", title: "片上互连", subtitle: "连接 SM 与内存分区", icon: "⇄" },
     { id: "l2", title: "L2 缓存", subtitle: "所有内存分区共享", icon: "▰" },
-    { id: "memory", title: "显存控制器", subtitle: "内存通道 · DRAM 时钟", icon: "▧" },
+    { id: "memory", title: "GPU 主存 / DRAM", subtitle: "容量支持说明 · 内存通道 · DRAM 时钟", icon: "▧" },
   ];
   const fields = [
     ["sms", "compute", "SM 总数", null, "个", 1, 4096],

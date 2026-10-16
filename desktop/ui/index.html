@@ -11,8 +11,12 @@
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="modules.css" />
     <link rel="stylesheet" href="canvas.css" />
+    <link rel="stylesheet" href="profiler.css" />
+    <link rel="stylesheet" href="theme.css" />
   </head>
   <body class="canvas-view">
+    <dialog id="new-canvas-dialog" aria-labelledby="new-canvas-title"><form id="new-canvas-form" class="canvas-details-form"><h2 id="new-canvas-title">新建画布</h2><label>画布名称<input id="new-canvas-name" maxlength="60" required autocomplete="off"></label><p class="helper">为这组实验起一个名字，之后可以右键画布标签修改。</p><div class="dialog-actions"><button type="button" class="secondary" id="cancel-new-canvas">取消</button><button class="primary" type="submit">创建画布</button></div></form></dialog>
+    <dialog id="canvas-details"><form id="canvas-details-form" class="canvas-details-form"><h2>画布设置</h2><label>画布名称<input id="canvas-name" maxlength="60" required></label><p id="canvas-delete-hint" class="helper"></p><button type="button" class="text-button danger" id="delete-canvas">删除当前画布</button><div class="dialog-actions"><button type="button" class="secondary" id="close-canvas-details">取消</button><button class="primary" type="submit">保存名称</button></div></form></dialog>
     <div class="titlebar">
       <span class="title-dot"></span>GPGPU Studio<span class="title-label"
         >GPU 架构实验</span
@@ -21,32 +25,21 @@
     <div class="app-layout">
       <aside class="sidebar">
         <div class="brand">
-          <div class="brand-mark">G</div>
+          <div class="brand-mark" data-ui-icon="chip"></div>
           <div>
-            <strong>GPGPU Studio</strong><small>EXPERIMENT WORKSPACE</small>
+            <strong>GPGPU Studio</strong><small>模拟实验工作空间</small>
           </div>
         </div>
         <div class="nav-label">工作空间</div>
-        <nav>
-          <button class="nav-item active" data-view="workbench">
-            <span class="nav-icon">▦</span>实验工作台
-          </button>
-          <button class="nav-item" data-view="results">
-            <span class="nav-icon">▤</span>运行与结果<span
-              class="nav-count"
-              id="nav-count"
-              >0</span
-            >
-          </button>
-          <button class="nav-item" data-view="environment">
-            <span class="nav-icon">⚙</span>环境设置
-          </button>
-          <button class="nav-item" data-view="store">
-            <span class="nav-icon">▧</span>PolyBench 商店
-          </button>
-          <button class="nav-item" data-view="tutorial">
-            <span class="nav-icon">?</span>部署教程
-          </button>
+        <nav aria-label="实验导航">
+          <button class="nav-item active" data-view="workbench"><span class="nav-icon" data-ui-icon="workspace"></span>实验工作台</button>
+          <button class="nav-item" data-view="results"><span class="nav-icon" data-ui-icon="chart"></span>运行与结果<span class="nav-count" id="nav-count">0</span></button>
+        </nav>
+        <div class="nav-label resources">资源与设置</div>
+        <nav aria-label="资源导航">
+          <button class="nav-item" data-view="store"><span class="nav-icon" data-ui-icon="book"></span>Benchmark 商店</button>
+          <button class="nav-item" data-view="environment"><span class="nav-icon" data-ui-icon="settings"></span>环境设置</button>
+          <button class="nav-item" data-view="tutorial"><span class="nav-icon" data-ui-icon="help"></span>部署教程</button>
         </nav>
         <div class="sidebar-bottom">
           <div class="backend-status">
@@ -62,10 +55,10 @@
       <main>
         <header class="page-header">
           <div>
-            <div class="eyebrow">GPGPU-SIM / WORKSPACE</div>
+            <div class="eyebrow">GPGPU-SIM · EXPERIMENT STUDIO</div>
             <h1 id="page-title">实验工作台</h1>
             <p id="page-description">
-              选择程序、规模和 GPU 配置，一次启动多个实验。
+              添加程序和 GPU，连接模块，在画布上运行实验。
             </p>
           </div>
           <div class="header-status" id="header-status">环境检测中…</div>
@@ -75,16 +68,21 @@
             <span>先接入 CUDA 和 GPGPU-Sim，完成检测后即可创建实验。</span
             ><button class="text-button" id="go-environment">设置环境 →</button>
           </div>
-          <div class="canvas-toolbar">
-            <div class="canvas-add-buttons"><button class="primary" id="add-benchmark-node">＋ 添加测试程序</button><button class="secondary" id="add-gpu-node">＋ 添加 GPU</button><button class="text-button" id="go-store">程序商店 ↗</button></div>
-            <div class="canvas-tools"><button id="canvas-connect" class="secondary" aria-pressed="false">⌁ 连线</button><button id="canvas-fit" class="secondary">适应画布</button><button id="canvas-settings-button" class="secondary">执行设置</button></div>
+          <div class="canvas-toolbar workspace-toolbar">
+            <div class="canvas-add-buttons"><button class="primary" id="add-benchmark-node"><span data-ui-icon="program"></span>选择程序</button><button class="secondary" id="add-gpu-node"><span data-ui-icon="chip"></span>选择 GPU</button><button class="text-button" id="go-store">Benchmark 商店</button></div>
+            <div class="canvas-tools"><button id="canvas-connect" class="secondary" aria-pressed="false"><span data-ui-icon="link"></span>连线</button><button id="canvas-fit" class="secondary" title="适应画布"><span data-ui-icon="fit"></span><span class="tool-label">适应画布</span></button><button class="secondary" id="canvas-details-button"><span data-ui-icon="settings"></span>画布设置</button><button id="canvas-settings-button" class="secondary"><span data-ui-icon="sliders"></span>执行设置</button></div>
+          </div>
+          <div class="canvas-tabbar workspace-tabs"><div id="canvas-tabs" role="tablist" aria-label="实验画布"></div><button class="text-button" id="new-canvas" title="新建画布"><span data-ui-icon="plus"></span><span>新建画布</span></button></div>
+          <div class="workspace-runtime" aria-label="任务与环境">
+            <div class="workspace-activity"><span class="activity-heading" id="workspace-activity-count">运行 0</span><div id="workspace-active-jobs" aria-label="正在执行的任务"></div><button class="text-button" id="workspace-queue" hidden>排队 0</button></div>
+            <button class="workspace-environment" id="workspace-environment" title="打开环境设置"><span class="status-dot" id="summary-dot"></span><strong id="summary-cuda">环境待接入</strong><span id="summary-sim">GPGPU-Sim</span></button>
           </div>
           <div class="canvas-layout">
-            <section class="canvas-panel"><div class="canvas-heading"><div><span class="canvas-live-dot"></span><strong>实验画布</strong><span id="canvas-count">0 个模块 · 0 条连接</span></div><span id="canvas-mode-hint">拖动方块 · 拖动空白平移 · 滚轮缩放</span></div>
-              <div class="canvas-viewport" id="canvas-viewport" tabindex="0" aria-label="实验画布"><div class="canvas-scene" id="canvas-scene"><svg id="canvas-lines" aria-hidden="true"></svg><div id="canvas-nodes"></div><div id="canvas-edge-actions"></div></div><div class="canvas-empty" id="canvas-empty"><div class="empty-workflow"><span>▦</span><i>···</i><span>▧</span></div><h2>从一个实验开始</h2><p>在上方添加测试程序和 GPU，<br>连接两个方块，便可开始运行。</p><button class="secondary" id="canvas-empty-add">＋ 添加测试程序</button></div><div class="canvas-zoom"><button id="canvas-zoom-out" aria-label="缩小画布">−</button><span id="canvas-zoom-value">100%</span><button id="canvas-zoom-in" aria-label="放大画布">＋</button></div></div>
+            <section class="canvas-panel"><div class="canvas-heading"><div><span class="canvas-live-dot"></span><strong id="canvas-active-name">实验画布</strong><span id="canvas-count">0 个模块 · 0 条连接</span></div><span id="canvas-mode-hint">拖动方块 · 拖动空白平移 · 滚轮缩放</span></div>
+              <div class="canvas-viewport" id="canvas-viewport" tabindex="0" aria-label="实验画布"><div class="canvas-scene" id="canvas-scene"><svg id="canvas-lines" aria-hidden="true"></svg><div id="canvas-nodes"></div><div id="canvas-edge-actions"></div></div><div class="canvas-empty" id="canvas-empty"><div class="empty-workflow"><span data-ui-icon="program"></span><i>···</i><span data-ui-icon="chip"></span></div><h2>搭建你的实验</h2><p>在顶部选择程序和 GPU，连接模块后运行。</p><button class="secondary" id="canvas-empty-add">＋ 选择程序</button></div><div class="canvas-zoom" data-canvas-ui><button id="canvas-zoom-out" aria-label="缩小画布">−</button><span id="canvas-zoom-value">100%</span><button id="canvas-zoom-in" aria-label="放大画布">＋</button></div><div class="canvas-gesture-hint" data-canvas-ui>拖动空白平移 · 滚轮缩放</div></div>
               <div class="canvas-footer"><span id="canvas-selection-hint">点击方块编辑参数，点击两侧圆点连接。</span><span>运行按钮右键可设置重复次数</span></div>
             </section>
-            <aside class="canvas-side"><section class="panel canvas-summary"><div class="eyebrow">EXPERIMENT CONNECTIONS</div><h2>实验连接</h2><div class="canvas-plan-number"><strong id="task-count">0</strong><span>个计划任务</span></div><p id="plan-formula">添加模块并连线</p><div id="canvas-connection-list"></div><p class="plan-validation" id="plan-validation" hidden></p><button class="primary" id="launch" disabled>▶ 运行全部就绪连接</button><div class="canvas-environment"><span class="status-dot" id="summary-dot"></span><div><strong id="summary-cuda">环境待接入</strong><small id="summary-sim">GPGPU-Sim</small></div></div></section><p class="canvas-side-note">每条连接对应一个程序与 GPU 组合，分别保存配置、日志和结果。可以同时运行多条连接。</p></aside>
+            <aside class="canvas-side floating-run-panel" aria-label="实验运行面板" data-canvas-ui><section class="panel canvas-summary"><div class="floating-run-heading"><h2>实验运行</h2><button id="toggle-run-panel" class="text-button" aria-expanded="false" aria-controls="canvas-connection-list" title="展开实验连接"><span id="run-panel-toggle-label">展开连接</span><span id="run-panel-chevron">⌃</span></button></div><div class="canvas-plan-number"><strong id="task-count">0</strong><span>个计划任务</span><small id="floating-run-progress"></small></div><p id="plan-formula">添加模块并连线</p><div id="canvas-connection-list" hidden></div><p class="plan-validation" id="plan-validation" hidden></p><button class="primary" id="launch" disabled>▶ 运行全部就绪连接</button></section></aside>
           </div>
           <div hidden><div id="benchmark-list"></div><div id="profile-list"></div><span id="profile-count"></span><button id="add-gpu"></button><span id="summary-bench"></span><span id="summary-size"></span><span id="summary-gpu"></span><span id="summary-concurrency"></span><input id="repeats" value="1"></div>
         </section>
@@ -270,10 +268,10 @@
         <section id="view-store" class="view" hidden>
           <div class="store-toolbar">
             <div>
-              <input id="store-search" placeholder="搜索程序名称或算法…" /><span
+              <input id="store-search" placeholder="搜索程序、算法或套件…" /><select id="store-suite" aria-label="按套件筛选"><option value="">全部套件</option></select><select id="store-readiness" aria-label="按接入状态筛选"><option value="">全部接入状态</option><option value="runnable">已接入运行</option><option value="available">当前可加入实验</option><option value="source">源码目录 · 待适配</option></select><span
                 class="subtle"
                 id="store-count"
-                >PolyBench/GPU CUDA · 15 个程序</span
+                >正在加载 Benchmark 目录…</span
               >
             </div>
             <div>
@@ -285,15 +283,15 @@
             </div>
           </div>
           <div class="store-source">
-            <strong>PolyBench/GPU 1.0 CUDA 套件</strong
+            <strong>GPGPU-Sim / Accel-Sim 生态集合</strong
             ><span>来源：GitHub / accel-sim / gpu-app-collection</span
             ><button class="text-button" id="select-store-all">
-              选择全部未下载
+              选择当前筛选中的未下载项
             </button>
           </div>
           <div id="store-grid" class="store-grid"></div>
           <p class="helper">
-            “已下载”表示源码可用。编译与数值正确性会在实际运行时检查；不同程序的规模宏在卡片中列出。
+            源码下载与运行接入分别显示。PolyBench 和已适配 Rodinia 程序可加入画布；其他条目提供上游源码下载与依赖说明。编译与正确性以实际运行为准。
           </p>
         </section>
         <section id="view-tutorial" class="view" hidden>
@@ -394,7 +392,18 @@ sudo apt-get install -y python3 git build-essential cmake bison flex zlib1g-dev 
       </main>
     </div>
     <dialog id="canvas-picker"><div class="dialog-heading"><div><div class="eyebrow">MODULE LIBRARY</div><h2 id="canvas-picker-title">添加模块</h2></div><button class="icon-button" id="close-canvas-picker" aria-label="关闭">✕</button></div><input id="canvas-picker-search" placeholder="搜索模块…" aria-label="搜索模块"><div class="canvas-picker-list" id="canvas-picker-list"></div><p class="helper">每次添加都会创建一个独立方块，可以设置不同参数。</p></dialog>
-    <dialog id="canvas-settings"><div class="dialog-heading"><h2>执行设置</h2><button class="icon-button" id="close-canvas-settings" aria-label="关闭">✕</button></div><div class="canvas-settings-fields"><label>最大并发数<input id="concurrency" type="number" min="1" max="32" value="1"><small>所有连接共用执行槽位；1 为顺序运行</small></label><label>每个任务时间上限 / 分钟<input id="wall-minutes" type="number" min="1" max="10080" value="30"></label><label>最大模拟周期<input id="max-cycles" type="number" min="0" value="0"><small>0 为不限制</small></label><label>新程序默认规模<input id="sizes" value="16"><small>添加后的每个方块可单独修改</small></label></div><div class="dialog-actions"><span class="helper">每条连接的重复次数在运行按钮右键菜单中设置。</span><button class="primary" id="save-canvas-settings">完成</button></div></dialog>
+    <dialog id="canvas-settings">
+      <div class="dialog-heading"><h2>执行设置</h2><button class="icon-button" id="close-canvas-settings" aria-label="关闭">✕</button></div>
+      <section class="cpu-settings" aria-label="CPU 分配">
+        <div class="cpu-heading"><strong>CPU 分配</strong><button id="refresh-cpu" class="text-button">重新检测</button></div>
+        <p id="cpu-summary" role="status">正在等待环境检测</p>
+        <p id="cpu-recommendation-note" class="helper"></p>
+        <div class="cpu-actions"><label class="cpu-toggle"><input id="bind-cpu" type="checkbox"><span>每个实验绑定一个逻辑 CPU</span></label><button id="apply-cpu-recommendation" class="secondary" disabled>使用推荐并发数</button></div>
+        <p id="cpu-binding-note" class="helper"></p>
+      </section>
+      <div class="canvas-settings-fields"><label>最大并发数<input id="concurrency" type="number" min="1" max="32" value="1"><small>所有连接共用执行槽位；1 为顺序运行</small></label><label>每个任务时间上限 / 分钟<input id="wall-minutes" type="number" min="1" max="10080" value="30"></label><label>最大模拟周期<input id="max-cycles" type="number" min="0" value="0"><small>0 为不限制</small></label><label>新程序默认规模<input id="sizes" value="16"><small>添加后的每个方块可单独修改</small></label></div>
+      <div class="dialog-actions"><span class="helper">每条连接的重复次数在运行按钮右键菜单中设置。</span><button class="primary" id="save-canvas-settings">完成</button></div>
+    </dialog>
     <div id="canvas-context" role="menu" hidden><strong id="canvas-context-title">实验设置</strong><div class="context-repeat"><label for="edge-repeats">运行次数</label><input id="edge-repeats" type="number" min="1" max="100" value="1"></div><div class="context-presets"><button data-edge-repeat="1">1 次</button><button data-edge-repeat="3">3 次</button><button data-edge-repeat="5">5 次</button><button data-edge-repeat="10">10 次</button></div><button id="save-edge-repeat">保存次数</button><button id="context-run-edge">▶ 开始运行</button><button id="context-stop-edge">停止本次运行</button><button id="context-result-edge">查看本次结果</button><button id="context-remove-edge" class="danger">删除连接</button></div>
     <dialog id="config-dialog">
       <div class="dialog-heading">
@@ -504,6 +513,16 @@ sudo apt-get install -y python3 git build-essential cmake bison flex zlib1g-dev 
         <button class="icon-button" id="close-job" aria-label="关闭">✕</button>
       </div>
       <div class="job-detail-summary" id="job-detail-summary"></div>
+      <div class="profile-mode-tabs" role="tablist" aria-label="实验详情视图">
+        <button id="show-profile" class="active" type="button" role="tab" aria-selected="true" aria-controls="profile-view">性能报告</button>
+        <button id="show-artifacts" type="button" role="tab" aria-selected="false" aria-controls="artifact-view">日志与文件</button>
+      </div>
+      <section id="profile-view" role="tabpanel" aria-labelledby="show-profile">
+        <div class="profile-toolbar"><label for="profile-kernel">Kernel / 统计区间</label><select id="profile-kernel"></select><button class="secondary" id="refresh-profile" type="button">重新解析</button></div>
+        <p id="profile-status" role="status"></p>
+        <div id="profile-content"></div>
+      </section>
+      <section id="artifact-view" role="tabpanel" aria-labelledby="show-artifacts" hidden>
       <div class="log-tabs">
         <button class="active" data-artifact="sim.log">运行日志</button
         ><button data-artifact="compile.log">编译日志</button
@@ -519,12 +538,16 @@ sudo apt-get install -y python3 git build-essential cmake bison flex zlib1g-dev 
         <span class="subtle" id="job-workdir"></span
         ><button class="secondary" id="refresh-log">刷新文件</button>
       </div>
+      </section>
     </dialog>
     <div id="toast" role="status" hidden></div>
+    <script src="icons.js"></script>
     <script src="gpu-model.js"></script>
     <script src="modules.js"></script>
     <script src="graph-model.js"></script>
     <script src="canvas.js"></script>
+    <script src="cpu.js"></script>
+    <script src="profiler.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

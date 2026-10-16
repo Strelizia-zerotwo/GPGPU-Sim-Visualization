@@ -12,6 +12,29 @@ test("a new workbench is empty and only explicitly connected instances form expe
   assert.throws(() => Graph.connect(graph, "gemm-2", "a100-1", "duplicate"), /已经连接/);
   Graph.remove(graph, "gemm-2"); assert.equal(graph.nodes.length, 2); assert.equal(graph.edges.length, 0);
 });
+
+test("legacy single canvas migrates without losing settings, positions, or job links", () => {
+  const graph = Graph.empty();
+  graph.nodes.push({ id: "old", x: -12, settings: { sizes: "7, 13" } });
+  graph.edges.push({ id: "edge", repeats: 3, jobIds: ["job"], submitting: true });
+  graph.viewport.zoom = 0.7;
+  const migrated = Graph.restoreCanvases({ canvas: graph }, () => "new-id");
+  assert.equal(migrated.length, 1); assert.equal(migrated[0].id, "new-id");
+  assert.deepEqual(migrated[0].nodes, graph.nodes);
+  assert.equal(migrated[0].viewport.zoom, 0.7);
+  assert.deepEqual(migrated[0].edges[0].jobIds, ["job"]);
+  assert.equal(migrated[0].edges[0].repeats, 3); assert.equal(migrated[0].edges[0].submitting, false);
+  const multiple = Graph.restoreCanvases({ canvases: [migrated[0], { ...Graph.empty(), id: "second", name: "另一张" }] }, () => "fallback");
+  assert.equal(multiple.length, 2); assert.equal(multiple[1].name, "另一张");
+});
+
+test("node connections support both fan out and fan in without including unrelated experiments", () => {
+  const graph = Graph.empty();
+  graph.edges = [{ id: "a", benchmarkNodeId: "b1", gpuNodeId: "g1" }, { id: "b", benchmarkNodeId: "b1", gpuNodeId: "g2" }, { id: "c", benchmarkNodeId: "b2", gpuNodeId: "g1" }, { id: "d", benchmarkNodeId: "b2", gpuNodeId: "g3" }];
+  assert.deepEqual(Graph.connectedEdges(graph, "b1").map(e => e.id), ["a", "b"]);
+  assert.deepEqual(Graph.connectedEdges(graph, "g1").map(e => e.id), ["a", "c"]);
+  assert.deepEqual(Graph.connectedEdges(graph, "empty"), []);
+});
 test("repeat progress counts actual jobs and never reports failures or unverified results as passed", () => {
   assert.equal(Graph.aggregate([{ status: "completed" }, { status: "running" }, { status: "queued" }]).completed, 1);
   assert.equal(Graph.aggregate([{ status: "completed" }, { status: "running" }]).busy, true);

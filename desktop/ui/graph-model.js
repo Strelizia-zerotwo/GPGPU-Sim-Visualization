@@ -5,6 +5,21 @@
 })(globalThis, function () {
   const nodeWidth = 242, nodeHeight = 174;
   function empty() { return { nodes: [], edges: [], viewport: { x: 36, y: 36, zoom: 1 } }; }
+  function restoreCanvases(saved, newId) {
+    const valid = c => c && Array.isArray(c.nodes) && Array.isArray(c.edges);
+    const candidates = Array.isArray(saved?.canvases) ? saved.canvases.filter(valid) : [];
+    if (!candidates.length) candidates.push(valid(saved?.canvas) ? saved.canvas : empty());
+    const ids = new Set();
+    return candidates.map((canvas, index) => {
+      const id = typeof canvas.id === "string" && canvas.id && !ids.has(canvas.id) ? canvas.id : newId();
+      ids.add(id);
+      return { ...canvas, id, name: String(canvas.name || `画布 ${index + 1}`).slice(0, 60),
+        viewport: canvas.viewport || empty().viewport, edges: canvas.edges.map(e => ({ ...e, submitting: false })) };
+    });
+  }
+  function connectedEdges(graph, nodeId) {
+    return graph.edges.filter(e => e.benchmarkNodeId === nodeId || e.gpuNodeId === nodeId);
+  }
   function pair(graph, firstId, secondId) {
     const first = graph.nodes.find(n => n.id === firstId), second = graph.nodes.find(n => n.id === secondId);
     if (!first || !second || first.kind === second.kind) throw new Error("请连接一个测试程序和一个 GPU。");
@@ -43,5 +58,5 @@
     const zoom = Math.min(1, Math.max(0.3, Math.min((width - 110) / (right - left), (height - 100) / (bottom - top))));
     return { x: (width - (right - left) * zoom) / 2 - left * zoom, y: (height - (bottom - top) * zoom) / 2 - top * zoom, zoom };
   }
-  return { empty, pair, connect, remove, aggregate, worldPoint, zoomAt, fit, nodeWidth, nodeHeight };
+  return { empty, restoreCanvases, connectedEdges, pair, connect, remove, aggregate, worldPoint, zoomAt, fit, nodeWidth, nodeHeight };
 });

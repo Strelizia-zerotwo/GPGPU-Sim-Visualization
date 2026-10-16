@@ -15,10 +15,13 @@ import threading
 import time
 from datetime import datetime, timezone
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from catalog import BENCHMARKS, PREFIX, catalog, descriptors, load_custom, save_custom
+from catalog import BENCHMARKS, PREFIX, catalog, descriptors, load_custom, save_custom, source_location
+from collection_adapters import prepare_collection, collection_arguments
 from operations import check_dependencies
 from adapters import compatibility_fixes
 from parameters import validate_parameters, validate_arguments
+from profiler import build_report
+from cpu import inspect_cpu, MARKER
 METRICS = {"gpu_tot_sim_cycle": "cycles", "gpu_tot_sim_insn": "instructions", "gpu_tot_ipc": "ipc"}
 
 
@@ -124,6 +127,27 @@ def discover_roots(home):
     return list(dict.fromkeys(found))
 
 
+def inspect_memory_capacity(sim):
+    """Report literal CUDA API values from source, never infer enforced VRAM capacity."""
+    relative = "libcuda/cuda_runtime_api.cc"
+    result = {"source": relative, "runtimeVerified": False, "devicePropertiesBytes": None, "memGetInfoTotalBytes": None}
+    try:
+        text = (sim / relative).read_text(errors="replace")
+    except OSError:
+        return result
+    text = re.sub(r"/\*[\s\S]*?\*/|//[^\n]*", "", text)
+
+    def literal_assignment(pattern, source):
+        values = re.findall(pattern + r"\s*=\s*(0[xX][0-9a-fA-F]+|[0-9]+)[uUlL]*\s*;", source)
+        return int(values[0], 0 if values[0].lower().startswith("0x") else 10) if len(values) == 1 else None
+
+    result["devicePropertiesBytes"] = literal_assignment(r"\bprop->totalGlobalMem", text)
+    function = re.search(r"\bcudaMemGetInfo\s*\([^)]*\)\s*\{([\s\S]*?)\n\}", text)
+    if function:
+        result["memGetInfoTotalBytes"] = literal_assignment(r"\*total", function[1])
+    return result
+
+
 def inspect_environment(settings):
     home = Path.home()
     roots = discover_roots(home) if not settings.get("simRoot") else []
@@ -175,8 +199,9 @@ def inspect_environment(settings):
         issues.append("没有找到 configs/tested-cfgs 中的 GPU 配置。")
     return {"ready": not issues, "paths": paths, "cudaVersion": version, "cudaCandidates": cuda_candidates,
             "setupScript": setup_path, "issues": issues, "profiles": profiles, "benchmarks": benchmarks,
-            "simulator": git_info(sim), "applications": git_info(apps), "supportedCapabilities": supported,
-            "cpuCount": os.cpu_count(), "runtimeVerified": False, "simulatorReady": simulator_ready,
+            "simulator": git_info(sim), "memoryCapacity": inspect_memory_capacity(sim),
+            "applications": git_info(apps), "supportedCapabilities": supported,
+            "cpuCount": os.cpu_count(), "cpu": inspect_cpu(), "runtimeVerified": False, "simulatorReady": simulator_ready,
             "sourceExists": (sim / "CMakeLists.txt").is_file() or (sim / "setup_environment").is_file(),
             "cudaAvailable": (cuda / "bin/nvcc").is_file(), "missingDependencies": check_dependencies(),
             "discoveredSimulators": [str(p) for p in roots]}
@@ -254,7 +279,13 @@ def terminate_group(process):
         pass
 
 
-def run_command(args, cwd, env, log_path, channel, cancel, deadline, parser=None):
+def run_command(args, cwd, env, log_path, channel, cancel, deadline, parser=None, affinity=None):
+    if affinity and affinity.get("enabled"):
+        cpu_id = affinity.get("cpuId")
+        info = inspect_cpu()
+        if not info["bindingSupported"] or type(cpu_id) is not int or cpu_id not in info["availableCpuIds"]:
+            raise ValueError("分配的 CPU 已不可用，请重新检测环境后提交。")
+        args = [sys.executable, str(Path(__file__).with_name("cpu.py")), "--exec", str(cpu_id), *args]
     emit("stage", stage=channel)
     with log_path.open("w", encoding="utf-8") as logfile:
         logfile.write("Command: " + json.dumps(args, ensure_ascii=False) + "\n\n")
@@ -279,6 +310,13 @@ def run_command(args, cwd, env, log_path, channel, cancel, deadline, parser=None
                     lines = pending.replace("\r", "\n").split("\n")
                     pending = lines.pop()
                     if lines:
+                        for line in lines:
+                            if affinity is not None and line.startswith(MARKER):
+                                verified = json.loads(line[len(MARKER):])
+                                if verified.get("cpuId") != affinity.get("cpuId") or verified.get("actualCpuIds") != [affinity.get("cpuId")]:
+                                    raise ValueError("CPU 绑定核验结果不匹配")
+                                affinity.update(verified)
+                                emit("cpu-affinity", cpuAffinity=affinity)
                         text = "\n".join(lines) + "\n"
                         logfile.write(text)
                         logfile.flush()
@@ -291,7 +329,10 @@ def run_command(args, cwd, env, log_path, channel, cancel, deadline, parser=None
                     emit("log", channel=channel, text=pending)
                     if parser:
                         parser.feed(pending)
-            return process.wait()
+            code = process.wait()
+            if affinity and affinity.get("enabled") and not affinity.get("verified"):
+                raise ValueError("未收到 CPU 绑定核验信息，请查看模拟日志。")
+            return code
         finally:
             if process.poll() is None:
                 terminate_group(process)
@@ -311,6 +352,7 @@ def save_json(path, value):
 
 def run_job(request, cancel):
     job = request["job"]
+    affinity = {"enabled": job.get("bindCpu") is True, "cpuId": job.get("cpuId"), "verified": False}
     identifier = job["id"]
     if not re.fullmatch(r"[a-zA-Z0-9_-]{1,100}", identifier):
         raise ValueError("无效的任务标识")
@@ -347,11 +389,16 @@ def run_job(request, cancel):
     text = replace_config(text, "-gpgpu_max_cycle", max_cycles)
     clock_mhz = float(config_value(text, "-gpgpu_clock_domains", "0").split(":")[0])
     builtin = descriptor["kind"] == "builtin"
-    source_path = apps / PREFIX / "CUDA" / descriptor["folder"] / descriptor["file"] if builtin else Path(descriptor["sourceRoot"]) / descriptor["file"]
+    collection = descriptor["kind"] == "collection"
+    if not descriptor.get("runnable", True):
+        raise ValueError("此条目目前只接入源码下载，尚未完成运行适配。")
+    source_path = source_location(apps, descriptor)
     original_source = source_path.read_text()
     parameters = job.get("parameters", {})
     prepared = prepare_source(original_source, benchmark, size, descriptor, parameters)
     _, adapter_patches = compatibility_fixes(original_source, benchmark) if builtin else (original_source, [])
+    if collection:
+        prepared, adapter_patches = prepare_collection(prepared, descriptor)
     work = runs / identifier
     work.mkdir(parents=True, exist_ok=False)
     # Each process gets a private complete copy of its profile and generated source.
@@ -360,10 +407,11 @@ def run_job(request, cancel):
             shutil.copy2(entry, work / entry.name)
     (work / "gpgpusim.config").write_text(text, encoding="utf-8")
     (work / "source.diff").write_text("".join(difflib.unified_diff(original_source.splitlines(True), prepared.splitlines(True), fromfile="original/"+descriptor["file"], tofile="experiment/"+descriptor["file"])), encoding="utf-8")
-    if builtin:
+    if builtin or collection:
         entry_file = descriptor["file"]
         (work / entry_file).write_text(prepared, encoding="utf-8")
-        shutil.copy2(apps / PREFIX / "common/polybenchUtilFuncts.h", work)
+        if builtin:
+            shutil.copy2(apps / PREFIX / "common/polybenchUtilFuncts.h", work)
         omitted_links = []
     else:
         root = Path(descriptor["sourceRoot"]).resolve()
@@ -394,6 +442,8 @@ def run_job(request, cancel):
     if builtin and arguments:
         raise ValueError("内置套件不支持自定义运行参数。")
     run_args = [arg.replace("{size}", str(size)) for arg in arguments]
+    if collection:
+        run_args = collection_arguments(descriptor, size, arguments)
     manifest = {"id": identifier, "createdAt": utc_now(), "benchmark": benchmark, "size": size, "profileId": profile_id,
                 "cudaVersion": environment["cudaVersion"], "paths": paths, "simulator": environment["simulator"],
                 "applications": environment["applications"], "setupScript": setup, "compileCommand": args,
@@ -401,11 +451,13 @@ def run_job(request, cancel):
                 "configSHA256": hash_file(work / "gpgpusim.config"), "adapterVersion": 3, "clockMHz": clock_mhz,
                 "parameters": parameters, "effectiveDimensions": {m: parameters.get(m, size) for m in descriptor["macros"]},
                 "baseProfileId": base_profile_id, "profileName": job.get("profileName", profile_id),
-                "canvasEdgeId": job.get("canvasEdgeId"), "benchmarkNodeId": job.get("benchmarkNodeId"), "gpuNodeId": job.get("gpuNodeId"),
+                "canvasId": job.get("canvasId"), "canvasName": job.get("canvasName"), "canvasEdgeId": job.get("canvasEdgeId"), "benchmarkNodeId": job.get("benchmarkNodeId"), "gpuNodeId": job.get("gpuNodeId"),
                 "benchmarkName": descriptor["name"], "scaleMacros": descriptor["macros"],
-                "adapterPatches": adapter_patches,
+                "adapterPatches": adapter_patches, "cpuAffinity": affinity, "cpuTopology": environment["cpu"],
                 "omittedExternalSourceLinks": omitted_links,
-                "customSource": None if builtin else {"root": descriptor["sourceRoot"], "repository": git_info(Path(descriptor["sourceRoot"])), "url": descriptor.get("repoURL", ""), "ref": descriptor.get("ref", "")},
+                "benchmarkSuite": descriptor.get("suite", "PolyBench/GPU" if builtin else "自定义程序"),
+                "upstreamSource": {"url": descriptor.get("repoURL", "https://github.com/accel-sim/gpu-app-collection.git"), "path": descriptor.get("sourceDir"), "catalogCommit": descriptor.get("catalogCommit")},
+                "customSource": None if builtin or collection else {"root": descriptor["sourceRoot"], "repository": git_info(Path(descriptor["sourceRoot"])), "url": descriptor.get("repoURL", ""), "ref": descriptor.get("ref", "")},
                 "runArguments": run_args, "repeatIndex": job.get("repeatIndex", 1), "repeatCount": job.get("repeatCount", 1)}
     save_json(work / "manifest.json", manifest)
     emit("prepared", workDir=str(work), manifest=manifest)
@@ -424,8 +476,8 @@ def run_job(request, cancel):
             if str(sim) not in cudart or "not found" in cudart:
                 raise ValueError("benchmark 没有链接到当前模拟器运行库，已停止运行。")
             parser = LogParser()
-            code = run_command([str(work / "benchmark"), *run_args], work, env, work / "sim.log", "running", cancel, deadline, parser)
-            result = parser.result(code, max_cycles, allow_unverified=not builtin)
+            code = run_command([str(work / "benchmark"), *run_args], work, env, work / "sim.log", "running", cancel, deadline, parser, affinity=affinity)
+            result = parser.result(code, max_cycles, allow_unverified=not (builtin or collection))
             result["exitCode"] = code
             if result["status"] == "completed" and clock_mhz > 0:
                 result["metrics"]["modeledTimeMs"] = result["metrics"]["cycles"] / (clock_mhz * 1000)
@@ -433,7 +485,13 @@ def run_job(request, cancel):
         result = {"status": exc.status, "correctness": "unknown", "metrics": {}}
     except Exception as exc:
         result = {"status": "failed", "correctness": "unknown", "metrics": {}, "error": str(exc)}
-    result.update({"elapsedSeconds": round(time.monotonic() - started, 3), "workDir": str(work), "finishedAt": utc_now()})
+    result.update({"elapsedSeconds": round(time.monotonic() - started, 3), "workDir": str(work), "finishedAt": utc_now(), "cpuAffinity": affinity})
+    save_json(work / "manifest.json", manifest)
+    try:
+        result["profile"] = build_report(work, result)
+        save_json(work / "profile.json", result["profile"])
+    except (OSError, ValueError) as exc:
+        result["profile"] = {"schemaVersion": 1, "kernels": [], "reason": "性能报告读取失败：" + str(exc)}
     save_json(work / "result.json", result)
     emit("done", result=result)
 
@@ -444,7 +502,7 @@ def read_artifact(request):
     if not work.is_relative_to(root):
         raise ValueError("任务目录不在当前实验根目录内")
     name = request.get("name", "sim.log")
-    if name not in {"sim.log", "compile.log", "manifest.json", "gpgpusim.config", "result.json", "source.diff"}:
+    if name not in {"sim.log", "compile.log", "manifest.json", "gpgpusim.config", "result.json", "profile.json", "source.diff"}:
         raise ValueError("不支持的文件")
     path = work / name
     if not path.resolve().is_relative_to(root):
@@ -458,6 +516,20 @@ def read_artifact(request):
     return {"text": ("[仅显示文件末尾 200 KB]\n" if length > 200000 else "") + text}
 
 
+def read_profile(request):
+    root = absolute_path(request["runsRoot"])
+    work = absolute_path(request["workDir"])
+    if not work.is_relative_to(root):
+        raise ValueError("任务目录不在当前实验根目录内")
+    # Unlike the log viewer, parse the entire log, not its last 200 KB.
+    for name in ("sim.log", "gpgpusim.config", "result.json", "gpgpu_inst_stats.txt"):
+        if not (work / name).resolve().is_relative_to(work):
+            raise ValueError("报告文件不在实验目录内")
+    result_path = work / "result.json"
+    result = json.loads(result_path.read_text()) if result_path.is_file() else {}
+    return build_report(work, result)
+
+
 def main():
     request = json.loads(sys.stdin.readline())
     operation = request.get("op")
@@ -465,6 +537,8 @@ def main():
         emit("response", result=inspect_environment(request.get("environment", {})))
     elif operation == "read":
         emit("response", result=read_artifact(request))
+    elif operation == "profile":
+        emit("response", result=read_profile(request))
     elif operation == "remove-custom":
         apps = absolute_path(request["environment"]["appsRoot"])
         entries = load_custom(apps)

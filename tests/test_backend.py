@@ -13,6 +13,22 @@ import adapters
 
 
 class BackendTests(unittest.TestCase):
+    def test_memory_capacity_reports_source_literals_without_claiming_runtime_limits(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            self.assertIsNone(bridge.inspect_memory_capacity(root)['devicePropertiesBytes'])
+            (root / 'libcuda').mkdir()
+            file = root / 'libcuda/cuda_runtime_api.cc'
+            file.write_text('prop->totalGlobalMem = 0x80000000 /* 2 GB */;\ncudaError_t cudaMemGetInfo(size_t *free, size_t *total) {\n *total = 10000000000ULL;\n}\n')
+            info = bridge.inspect_memory_capacity(root)
+            self.assertEqual(info['devicePropertiesBytes'], 2147483648)
+            self.assertEqual(info['memGetInfoTotalBytes'], 10000000000)
+            self.assertFalse(info['runtimeVerified'])
+            file.write_text('// prop->totalGlobalMem = 123;\nprop->totalGlobalMem = configured_capacity;\ncudaError_t cudaMemGetInfo(size_t *free, size_t *total) {\n *total = capacity();\n}\n')
+            info = bridge.inspect_memory_capacity(root)
+            self.assertIsNone(info['devicePropertiesBytes'])
+            self.assertIsNone(info['memGetInfoTotalBytes'])
+
     def test_independent_gemm_dimensions_and_blocks_apply_to_the_experiment_copy(self):
         source = '#define NI 512\n#define NJ 512\n#define NK 512\n#define DIM_THREAD_BLOCK_X 32\n#define DIM_THREAD_BLOCK_Y 8\ndim3 grid((size_t)(ceil( ((float)NI)/ ((float)block.x) )),(size_t)(ceil( ((float)NJ)/ ((float)block.y) )));'
         generated = bridge.prepare_source(source, 'gemm', 8, parameters={'NI':7,'NJ':13,'NK':5,'DIM_THREAD_BLOCK_X':8,'DIM_THREAD_BLOCK_Y':4})

@@ -1,6 +1,6 @@
 {
   "name": "gpgpu-studio",
-  "version": "0.4.0",
+  "version": "0.6.1",
   "private": true,
   "description": "GPGPU-Sim desktop experiment manager for WSL and Linux",
   "main": "desktop/main.cjs",
@@ -14,7 +14,10 @@
     "pack": "electron-builder --dir",
     "dist:win": "electron-builder --win portable --x64",
     "test:modules": "node tests/canvas-smoke.cjs",
-    "test:canvas": "node tests/canvas-smoke.cjs"
+    "test:canvas": "node tests/canvas-smoke.cjs",
+    "test:profiler": "node tests/profiler-smoke.cjs",
+    "test:workspace": "node tests/workspace-smoke.cjs",
+    "test:studio": "node tests/studio-smoke.cjs"
   },
   "devDependencies": {
     "electron": "44.7.0",

@@ -60,7 +60,7 @@ class JobManager extends EventEmitter {
       }
       if (Object.values(blocks).some(n => n > 1024)) throw new Error("线程块的线程总数不能超过 1024。");
       const runtimeArgs = module.runtimeArgs ?? benchmark.args ?? [];
-      if (!Array.isArray(runtimeArgs) || runtimeArgs.length > 30 || runtimeArgs.some(a => typeof a !== "string" || a.length >= 500 || a.includes("\0")) || (benchmark.kind !== "custom" && runtimeArgs.length)) throw new Error("程序运行参数无效。");
+      if (!Array.isArray(runtimeArgs) || runtimeArgs.length > 30 || runtimeArgs.some(a => typeof a !== "string" || a.length >= 500 || a.includes("\0")) || (benchmark.kind !== "custom" && JSON.stringify(runtimeArgs) !== JSON.stringify(benchmark.args || []))) throw new Error("程序运行参数无效。");
       return { benchmark, sizes, parameters: { ...parameters }, runtimeArgs: [...runtimeArgs] };
     });
     const profilePlans = gpuModules.map(module => {
@@ -91,6 +91,12 @@ class JobManager extends EventEmitter {
     const concurrency = Number(spec.maxConcurrent);
     if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 32)
       throw new Error("最大并发数须为 1–32。");
+    if (spec.bindCpu !== undefined && typeof spec.bindCpu !== "boolean")
+      throw new Error("CPU 绑定开关无效。");
+    const cpu = catalog.cpu;
+    if (spec.bindCpu && (!cpu?.bindingSupported || !cpu.allocationOrder?.length ||
+        !cpu.allocationOrder.every(id => Number.isInteger(id) && id >= 0 && cpu.availableCpuIds?.includes(id))))
+      throw new Error("当前环境无法绑定 CPU，请重新检测或关闭绑定。");
     if (
       !Number.isInteger(spec.maxCycles) ||
       spec.maxCycles < 0 ||
@@ -113,6 +119,8 @@ class JobManager extends EventEmitter {
             const job = {
               id: randomUUID(),
               batchId,
+              canvasId: typeof spec.canvas?.canvasId === "string" ? spec.canvas.canvasId.slice(0, 100) : null,
+              canvasName: typeof spec.canvas?.canvasName === "string" ? spec.canvas.canvasName.slice(0, 60) : null,
               canvasEdgeId: typeof spec.canvas?.edgeId === "string" ? spec.canvas.edgeId.slice(0, 100) : null,
               benchmarkNodeId: typeof spec.canvas?.benchmarkNodeId === "string" ? spec.canvas.benchmarkNodeId.slice(0, 100) : null,
               gpuNodeId: typeof spec.canvas?.gpuNodeId === "string" ? spec.canvas.gpuNodeId.slice(0, 100) : null,
@@ -130,6 +138,9 @@ class JobManager extends EventEmitter {
               configText: profile.text,
               maxCycles: spec.maxCycles,
               wallMinutes: spec.wallMinutes,
+              bindCpu: spec.bindCpu === true,
+              cpuCandidates: spec.bindCpu ? [...new Set(cpu.allocationOrder)] : [],
+              cpuId: null,
               environment: { ...environment },
               status: "queued",
               createdAt: new Date().toISOString(),
@@ -148,8 +159,11 @@ class JobManager extends EventEmitter {
   pump() {
     if (this.paused) return;
     while (this.active.size < this.maxConcurrent) {
-      const job = this.jobs.find((j) => j.status === "queued");
+      const freeCpu = j => j.cpuCandidates.find(cpu => !this.jobs.some(other =>
+        this.active.has(other.id) && other.bindCpu && other.cpuId === cpu));
+      const job = this.jobs.find((j) => j.status === "queued" && (!j.bindCpu || freeCpu(j) !== undefined));
       if (!job) break;
+      if (job.bindCpu) job.cpuId = freeCpu(job);
       job.status = "preparing";
       job.startedAt = new Date().toISOString();
       // Register before launching so a synchronous worker cannot exceed the limit.
@@ -163,6 +177,9 @@ class JobManager extends EventEmitter {
         } else if (event.type === "prepared") {
           job.workDir = event.workDir;
           job.manifest = event.manifest;
+        } else if (event.type === "cpu-affinity") {
+          job.cpuAffinity = event.cpuAffinity;
+          if (job.manifest) job.manifest.cpuAffinity = event.cpuAffinity;
         } else if (event.type === "log") {
           this.emit("log", {
             jobId: job.id,

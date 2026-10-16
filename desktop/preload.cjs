@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("studio", {
   submit: (spec) => ipcRenderer.invoke("studio:submit", spec),
   cancel: (id) => ipcRenderer.invoke("studio:cancel", id),
   read: (id, name) => ipcRenderer.invoke("studio:read", { id, name }),
+  profile: (id) => ipcRenderer.invoke("studio:profile", id),
   openFolder: (id) => ipcRenderer.invoke("studio:open-folder", id),
   exportCSV: () => ipcRenderer.invoke("studio:export"),
   help: (topic) => ipcRenderer.invoke("studio:help", topic),

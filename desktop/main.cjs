@@ -372,16 +372,9 @@ app.whenReady().then(() => {
       platform: process.platform,
       version: app.getVersion(),
       maintenance,
-      benchmarksFallback: Object.entries(
-        JSON.parse(
-          fs.readFileSync(
-            app.isPackaged
-              ? path.join(process.resourcesPath, "backend/polybench.json")
-              : path.join(__dirname, "../backend/polybench.json"),
-            "utf8",
-          ),
-        ),
-      ).map(([id, descriptor]) => ({ ...descriptor, id, available: false })),
+      benchmarksFallback: ["polybench.json", "collections.json"].flatMap(file => Object.entries(
+        JSON.parse(fs.readFileSync(app.isPackaged ? path.join(process.resourcesPath, "backend", file) : path.join(__dirname, "../backend", file), "utf8"))
+      ).map(([id, descriptor]) => ({ ...descriptor, id, suite: descriptor.suite || "PolyBench/GPU", runnable: descriptor.runnable !== false, available: false, downloaded: false }))),
     };
   });
   ipcMain.handle("studio:inspect", async (_, settings) => {
@@ -414,6 +407,11 @@ app.whenReady().then(() => {
     return manager.submit(spec, state.settings, environmentInfo);
   });
   ipcMain.handle("studio:cancel", (_, id) => manager.cancel(id));
+  ipcMain.handle("studio:profile", (_, id) => {
+    const job = manager.jobs.find(j => j.id === id);
+    if (!job?.workDir) return { kernels: [], reason: "任务尚未生成运行日志。" };
+    return requestBridge({ op: "profile", workDir: job.workDir, runsRoot: job.environment.runsRoot }, job.environment);
+  });
   ipcMain.handle("studio:read", (_, { id, name }) => {
     const job = manager.jobs.find((j) => j.id === id);
     if (!job?.workDir) return { text: "任务尚未生成工作目录。" };
@@ -462,6 +460,9 @@ app.whenReady().then(() => {
       "cuda_version",
       "simulator_commit",
       "work_dir",
+      "canvas_id",
+      "canvas_name",
+      "canvas_edge_id",
     ];
     const rows = manager.jobs.map((job) => [
       job.id,
@@ -481,6 +482,9 @@ app.whenReady().then(() => {
       job.manifest?.cudaVersion,
       job.manifest?.simulator?.commit,
       job.workDir,
+      job.canvasId,
+      job.canvasName,
+      job.canvasEdgeId,
     ]);
     fs.writeFileSync(
       selection.filePath,
@@ -506,9 +510,10 @@ app.whenReady().then(() => {
     minWidth: 1100,
     minHeight: 760,
     title: "GPGPU Studio",
-    backgroundColor: "#f5f7fa",
+    backgroundColor: "#ffffff",
     titleBarStyle: "hidden",
-    titleBarOverlay: { color: "#ffffff", symbolColor: "#536174", height: 42 },
+    titleBarOverlay: { color: "#f4f4f4", symbolColor: "#454545", height: 32 },
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,

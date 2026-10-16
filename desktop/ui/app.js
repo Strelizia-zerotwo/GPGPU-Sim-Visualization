@@ -11,6 +11,9 @@ const state = {
   gpuEditor: null,
   benchmarkId: null,
   canvas: CanvasGraph.empty(),
+  canvases: [],
+  activeCanvasId: null,
+  runPanelExpanded: false,
   canvasEditing: null,
   view: "workbench",
   configId: null,
@@ -56,8 +59,8 @@ const descriptions = {
   ],
   environment: ["环境设置", "接入已有 CUDA 和模拟器，检测后即可开始实验。"],
   store: [
-    "PolyBench 商店",
-    "浏览 CUDA 套件的全部程序，按需下载，也可以添加自己的程序。",
+    "Benchmark 商店",
+    "按套件浏览 GPGPU-Sim / Accel-Sim 生态程序，下载源码或加入实验。",
   ],
   tutorial: ["部署教程", "从安装 WSL，到准备 CUDA 和一键编译模拟器。"],
 };
@@ -282,6 +285,7 @@ function applyEnvironment(info) {
     state.drafts = {};
   state.info = info;
   state.settings = info.settings;
+  renderCpuSettings();
   if (info.distros)
     $("distro").innerHTML = info.distros
       .map(
@@ -341,19 +345,20 @@ async function detectAutomatically(quiet = false) {
 function renderStore() {
   const benchmarks = state.info?.benchmarks || state.fallbackBenchmarks;
   const query = $("store-search").value.trim().toLowerCase();
-  const visible = benchmarks.filter((b) =>
-    (b.name + " " + b.description).toLowerCase().includes(query),
-  );
-  $("store-count").textContent =
-    `${benchmarks.filter((b) => b.kind === "builtin").length} 个套件程序 · ${benchmarks.filter((b) => b.available).length} 个已下载`;
-  $("store-grid").innerHTML = visible
-    .map(
-      (b) =>
-        `<article class="store-card ${b.available ? "installed" : ""}" data-store-id="${escapeHTML(b.id)}"><div class="store-card-heading"><span class="benchmark-symbol">${b.kind === "custom" ? "＋" : "▦"}</span><div><h3>${escapeHTML(b.name)}</h3><span class="badge ${b.available ? "good" : "neutral"}">${b.available ? "源码可用" : "未下载 / 来源不可用"}</span></div>${b.kind === "builtin" && !b.available ? `<input type="checkbox" aria-label="下载 ${escapeHTML(b.name)}" data-store-select="${escapeHTML(b.id)}" ${state.storeSelection.has(b.id) ? "checked" : ""}>` : ""}</div><p>${escapeHTML(b.description)}</p><small>规模：${escapeHTML(b.sizeLabel || (b.macros || []).join(" = ") || "运行参数 {size}")}</small><small class="store-adaptation">${escapeHTML(b.adaptationNote || "自定义源码按所填规模方式编译")}</small><small class="store-origin">${b.kind === "builtin" ? "PolyBench/GPU · gpu-app-collection" : escapeHTML(b.sourceURL || "自定义本地源码")}</small><div class="store-card-actions">${b.available ? `<button class="secondary" data-use-benchmark="${escapeHTML(b.id)}">加入实验</button>` : b.kind === "builtin" ? `<button class="primary" data-download="${escapeHTML(b.id)}" ${state.info ? "" : "disabled"}>下载程序</button>` : '<span class="subtle">检查源码路径或重新添加</span>'}${b.kind === "custom" ? `<button class="text-button" data-remove-custom="${escapeHTML(b.id)}">移出列表</button>` : ""}</div></article>`,
-    )
-    .join("");
+  const suite = $("store-suite").value, readiness = $("store-readiness").value;
+  const suites = [...new Set(benchmarks.map(b => b.suite || "自定义程序"))].sort();
+  $("store-suite").innerHTML = '<option value="">全部套件</option>' + suites.map(name => `<option value="${escapeHTML(name)}">${escapeHTML(name)} (${benchmarks.filter(b => b.suite === name).length})</option>`).join("");
+  $("store-suite").value = suites.includes(suite) ? suite : "";
+  const visible = benchmarks.filter(b => (!suite || b.suite === suite) && (!readiness || (readiness === "runnable" ? b.runnable !== false : readiness === "available" ? b.available : b.runnable === false)) &&
+    `${b.name} ${b.description} ${b.suite} ${b.sourceDir || ""}`.toLowerCase().includes(query));
+  $("store-count").textContent = `${visible.length} / ${benchmarks.length} 项 · ${suites.length} 个套件 / 来源 · ${benchmarks.filter(b => b.available).length} 项可加入实验`;
+  $("store-grid").innerHTML = visible.map(b => {
+    const downloadable = b.kind !== "custom" && !b.downloaded;
+    const status = b.available ? "可加入实验" : b.downloaded ? "源码已下载 · 待运行适配" : b.runnable === false ? "未下载 · 待运行适配" : "未下载";
+    return `<article class="store-card ${b.available ? "installed" : ""}" data-store-id="${escapeHTML(b.id)}"><div class="store-card-heading"><span class="benchmark-symbol">${b.kind === "custom" ? "＋" : "▦"}</span><div><small class="suite-label">${escapeHTML(b.suite || "自定义程序")}</small><h3>${escapeHTML(b.name)}</h3><span class="badge ${b.available ? "good" : "neutral"}">${status}</span></div>${downloadable ? `<input type="checkbox" aria-label="下载 ${escapeHTML(b.name)}" data-store-select="${escapeHTML(b.id)}" ${state.storeSelection.has(b.id) ? "checked" : ""}>` : ""}</div><p>${escapeHTML(b.description)}</p>${b.runnable !== false ? `<small>规模：${escapeHTML(b.sizeLabel || (b.macros || []).join(" = ") || "运行参数 {size}")}</small>` : ""}<small class="store-adaptation">${escapeHTML(b.adaptationNote || b.requirements || "自定义源码按所填规模方式编译")}</small><details class="store-source-details"><summary>源码与适配信息</summary><small>${escapeHTML(b.sourceURL || "https://github.com/accel-sim/gpu-app-collection")}</small>${b.sourceDir ? `<small>${escapeHTML(b.sourceDir)}</small>` : ""}${b.catalogCommit ? `<small>目录版本 ${escapeHTML(b.catalogCommit.slice(0, 12))}</small>` : ""}<small>${b.runnable === false ? "已收录上游源码下载。添加到画布前，需要完成编译、输入数据、规模参数和校验适配。可使用「添加自己的程序」注册单入口 CUDA 程序。" : "已接入规模设置和独立实验流程。实际编译和数值正确性以运行结果为准。"}</small></details><div class="store-card-actions">${b.available ? `<button class="secondary" data-use-benchmark="${escapeHTML(b.id)}">加入实验</button>` : downloadable ? `<button class="primary" data-download="${escapeHTML(b.id)}" ${state.info ? "" : "disabled"}>${b.runnable === false ? "下载源码" : "下载程序"}</button>` : `<span class="subtle">${b.kind === "custom" ? "检查源码路径或重新添加" : "源码已保留，等待适配"}</span>`}${b.downloaded && b.source ? `<button class="text-button" data-copy-source="${escapeHTML(b.id)}">复制源码路径</button>` : ""}${b.kind === "custom" ? `<button class="text-button" data-remove-custom="${escapeHTML(b.id)}">移出列表</button>` : ""}</div></article>`;
+  }).join("") || '<p class="helper">没有匹配的程序，试试其他套件或搜索词。</p>';
   for (const b of benchmarks)
-    if (b.available) state.storeSelection.delete(b.id);
+    if (b.downloaded || b.available) state.storeSelection.delete(b.id);
   $("download-selected").textContent =
     `下载所选程序（${state.storeSelection.size}）`;
   $("download-selected").disabled =
@@ -373,7 +378,7 @@ function renderMaintenance(value) {
   const active = ["preparing", "running"].includes(value.status);
   const titles = {
     deploy: "GPGPU-Sim 部署",
-    "install-benchmarks": "PolyBench 下载",
+    "install-benchmarks": "Benchmark 下载",
     "add-custom": "添加自定义程序",
   };
   const stages = {
@@ -464,7 +469,7 @@ function renderJobs() {
     .reverse()
     .map(
       (job) =>
-        `<tr data-job-row="${job.id}"><td><button class="job-name" data-job="${job.id}">${escapeHTML(job.benchmarkName || job.benchmark.toUpperCase())}<small>${escapeHTML(job.workloadLabel || `规模 ${job.size}`)}${job.repeatCount > 1 ? ` · 第 ${job.repeatIndex}/${job.repeatCount} 次` : ""} · ${job.id.slice(0, 8)}</small></button></td><td>${escapeHTML(job.profileName)}</td><td>${badge(job.status)}</td><td class="${job.correctness === "passed" ? "correct-pass" : job.correctness === "failed" ? "correct-fail" : ""}">${job.correctness === "passed" ? "✓ 通过" : job.correctness === "failed" ? `${job.mismatches} 项不匹配` : job.status === "unverified" ? "未提供比对" : "待验证"}</td><td>${number(job.metrics?.cycles)}</td><td>${number(job.metrics?.ipc)}</td><td>${terminal.has(job.status) ? `<button class="text-button" data-job="${job.id}">详情 →</button>` : `<button class="cancel-button" data-cancel="${job.id}">取消</button>`}</td></tr>`,
+        `<tr data-job-row="${job.id}"><td><button class="job-name" data-job="${job.id}">${escapeHTML(job.benchmarkName || job.benchmark.toUpperCase())}<small>${escapeHTML(job.workloadLabel || `规模 ${job.size}`)}${job.repeatCount > 1 ? ` · 第 ${job.repeatIndex}/${job.repeatCount} 次` : ""} · ${job.id.slice(0, 8)}</small>${job.canvasName ? `<small>画布：${escapeHTML(job.canvasName)}</small>` : ""}</button></td><td>${escapeHTML(job.profileName)}</td><td>${badge(job.status)}</td><td class="${job.correctness === "passed" ? "correct-pass" : job.correctness === "failed" ? "correct-fail" : ""}">${job.correctness === "passed" ? "✓ 通过" : job.correctness === "failed" ? `${job.mismatches} 项不匹配` : job.status === "unverified" ? "未提供比对" : "待验证"}</td><td>${number(job.metrics?.cycles)}</td><td>${number(job.metrics?.ipc)}</td><td>${terminal.has(job.status) ? `<button class="text-button" data-job="${job.id}">详情 →</button>` : `<button class="cancel-button" data-cancel="${job.id}">取消</button>`}</td></tr>`,
     )
     .join("");
   renderComparison();
@@ -503,9 +508,10 @@ function renderJobDetail() {
       ? Math.max(0, (Date.now() - new Date(job.startedAt)) / 1000)
       : 0);
   $("job-detail-summary").innerHTML =
-    `${badge(job.status)}<span>模拟周期 ${number(job.metrics?.cycles)}</span><span>IPC ${number(job.metrics?.ipc)}</span><span>主机耗时 ${seconds.toFixed(1)} s</span>${job.error ? `<span class="correct-fail">${escapeHTML(job.error)}</span>` : ""}`;
+    `${badge(job.status)}<span>模拟周期 ${number(job.metrics?.cycles)}</span><span>IPC ${number(job.metrics?.ipc)}</span><span>主机耗时 ${seconds.toFixed(1)} s</span><span>${escapeHTML(cpuJobLabel(job))}</span>${job.error ? `<span class="correct-fail">${escapeHTML(job.error)}</span>` : ""}`;
   $("job-workdir").textContent = job.workDir || "正在准备独立工作目录";
   $("open-job-folder").disabled = !job.workDir;
+  ProfileUI.update(job);
 }
 async function loadArtifact() {
   const generation = ++readGeneration;
@@ -538,6 +544,7 @@ function openJob(id) {
       el.classList.toggle("active", el.dataset.artifact === state.artifact),
     );
   renderJobDetail();
+  ProfileUI.open(id, state.jobs.find(j => j.id === id));
   $("job-dialog").showModal();
   loadArtifact();
 }
@@ -687,6 +694,7 @@ $("deploy-simulator").onclick = () =>
   });
 $("cancel-maintenance").onclick = () => window.studio.cancelMaintenance();
 $("store-search").oninput = renderStore;
+$("store-suite").onchange = $("store-readiness").onchange = renderStore;
 $("store-grid").onchange = (event) => {
   const id = event.target.dataset.storeSelect;
   if (!id) return;
@@ -697,7 +705,7 @@ $("store-grid").onchange = (event) => {
 };
 $("select-store-all").onclick = () => {
   const all = (state.info?.benchmarks || state.fallbackBenchmarks).filter(
-    (b) => b.kind === "builtin" && !b.available,
+    (b) => b.kind !== "custom" && !b.downloaded && (!$("store-suite").value || b.suite === $("store-suite").value) && (!$("store-readiness").value || ($("store-readiness").value === "runnable" ? b.runnable !== false : $("store-readiness").value === "available" ? b.available : b.runnable === false)) && `${b.name} ${b.description} ${b.suite}`.toLowerCase().includes($("store-search").value.trim().toLowerCase()),
   );
   const alreadyAll = all.every((b) => state.storeSelection.has(b.id));
   state.storeSelection = alreadyAll ? new Set() : new Set(all.map((b) => b.id));
@@ -708,6 +716,10 @@ $("download-selected").onclick = () =>
 $("store-grid").onclick = async (event) => {
   const button = event.target.closest("button");
   if (!button) return;
+  if (button.dataset.copySource) {
+    const b = state.info?.benchmarks.find(b => b.id === button.dataset.copySource);
+    if (b) { await window.studio.copyText(b.source); toast("源码路径已复制。"); }
+  }
   if (button.dataset.download)
     startOperation({
       op: "install-benchmarks",

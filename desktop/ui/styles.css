@@ -1291,3 +1291,13 @@ textarea {
     transition: none !important;
   }
 }
+
+.store-toolbar { flex-wrap:wrap; }
+.store-toolbar > div:first-child { flex-wrap:wrap; flex:1; min-width:0; }
+.store-toolbar input { width:230px; }
+.store-toolbar select { max-width:230px; font-size:11px; }
+.store-toolbar .subtle { flex-basis:100%; }
+.suite-label { display:block; color:#6e948a; font-size:10px; margin-bottom:5px; }
+.store-source-details { font-size:10px; color:#7892a2; margin:12px 0; }
+.store-source-details summary { cursor:pointer; }
+.store-source-details small { display:block; overflow-wrap:anywhere; line-height:1.7; margin-top:6px; }

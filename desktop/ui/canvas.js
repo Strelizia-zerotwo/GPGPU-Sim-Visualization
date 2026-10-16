@@ -3,8 +3,8 @@ let canvasPickerKind = "benchmark", canvasConnecting = null, canvasPointer = nul
 let canvasConnectMode = false, canvasContextEdge = null, canvasIgnoreClickUntil = 0;
 let canvasJobFrame = null;
 const copyCanvasValue = value => JSON.parse(JSON.stringify(value));
-const canvasNode = id => state.canvas.nodes.find(n => n.id === id);
-const canvasEdge = id => state.canvas.edges.find(e => e.id === id);
+const canvasNode = (id, graph = state.canvas) => graph.nodes.find(n => n.id === id);
+const canvasEdge = (id, graph = state.canvas) => graph.edges.find(e => e.id === id);
 
 function canvasGpuProfile(node) {
   const p = node.settings;
@@ -72,15 +72,15 @@ function canvasNodeStatus(node) {
   return status;
 }
 function restoreCanvasJobLinks() {
-  for (const edge of state.canvas.edges) {
+  for (const graph of state.canvases) for (const edge of graph.edges) {
     edge.submitting = false;
     const jobs = state.jobs.filter(j => j.canvasEdgeId === edge.id);
     const latestBatch = jobs.at(-1)?.batchId;
     if (latestBatch) edge.jobIds = jobs.filter(j => j.batchId === latestBatch).map(j => j.id);
   }
 }
-function edgeSpec(edge) {
-  const benchmarkNode = canvasNode(edge.benchmarkNodeId), gpuNode = canvasNode(edge.gpuNodeId);
+function edgeSpec(edge, graph = state.canvas) {
+  const benchmarkNode = canvasNode(edge.benchmarkNodeId, graph), gpuNode = canvasNode(edge.gpuNodeId, graph);
   if (!benchmarkNode || !gpuNode) throw new Error("连接缺少程序或 GPU 模块。");
   const benchmark = state.info?.benchmarks.find(b => b.id === benchmarkNode.sourceId && b.available);
   if (!benchmark) throw new Error("程序源码暂不可用。");
@@ -91,34 +91,93 @@ function edgeSpec(edge) {
   if (!Number.isInteger(edge.repeats) || edge.repeats < 1 || edge.repeats > 100 || program.sizes.length * edge.repeats > 100) throw new Error("每条连接最多运行 100 个任务，请减少规模或重复次数。");
   const gpu = { ...gpuSpec(profile), name: gpuNode.title };
   return { benchmarkModules: [program], gpuModules: [gpu], drafts: profile.custom ? {} : { [profile.id]: gpuNode.settings.configText || profile.text },
-    repeats: edge.repeats, maxConcurrent: Number($("concurrency").value), wallMinutes: Number($("wall-minutes").value), maxCycles: Number($("max-cycles").value),
-    canvas: { edgeId: edge.id, benchmarkNodeId: benchmarkNode.id, gpuNodeId: gpuNode.id } };
+    repeats: edge.repeats, maxConcurrent: Number($("concurrency").value), bindCpu: $("bind-cpu").checked, wallMinutes: Number($("wall-minutes").value), maxCycles: Number($("max-cycles").value),
+    canvas: { canvasId: graph.id, canvasName: graph.name, edgeId: edge.id, benchmarkNodeId: benchmarkNode.id, gpuNodeId: gpuNode.id } };
 }
-function edgeValidation(edge) {
+function edgeValidation(edge, graph = state.canvas) {
   if (!state.info?.ready) return "先完成环境检测";
-  try { edgeSpec(edge); return ""; } catch (error) { return error.message; }
+  try { edgeSpec(edge, graph); return ""; } catch (error) { return error.message; }
 }
-function edgeSignature(edge) {
-  const a = canvasNode(edge.benchmarkNodeId), b = canvasNode(edge.gpuNodeId);
+function edgeSignature(edge, graph = state.canvas) {
+  const a = canvasNode(edge.benchmarkNodeId, graph), b = canvasNode(edge.gpuNodeId, graph);
   return JSON.stringify([a?.sourceId, a?.settings, b?.sourceId, b?.settings, edge.repeats]);
 }
+async function submitCanvasEdges(graph, edges) {
+  // Snapshot every request and reserve every edge before the first asynchronous submit.
+  // A canvas switch or later edit cannot redirect the remaining requests.
+  const requests = [], skipped = [];
+  for (const edge of edges) {
+    if (canvasEdgeStatus(edge).busy) { skipped.push("正在执行"); continue; }
+    const error = edgeValidation(edge, graph);
+    if (error) { skipped.push(error); continue; }
+    requests.push({ edge, spec: copyCanvasValue(edgeSpec(edge, graph)), signature: edgeSignature(edge, graph) });
+  }
+  if (!requests.length) return toast(skipped[0] || "请先连接程序和 GPU。", true);
+  for (const { edge, signature } of requests) {
+    edge.submitting = true; edge.error = ""; edge.jobIds = []; edge.lastSignature = signature;
+  }
+  renderCanvas(); persistWorkbench();
+  let submitted = 0, tasks = 0;
+  for (const { edge, spec } of requests) {
+    try { edge.jobIds = await window.studio.submit(spec); submitted++; tasks += edge.jobIds.length; }
+    catch (error) { edge.error = error.message; }
+    finally { edge.submitting = false; renderCanvas(); persistWorkbench(); }
+  }
+  const failures = requests.length - submitted;
+  toast(`${graph.name}：已提交 ${submitted} 条连接 / ${tasks} 个任务${skipped.length ? `，跳过 ${skipped.length} 条忙碌或未就绪连接` : ""}${failures ? `，${failures} 条提交失败，请查看连线` : ""}。`, failures > 0);
+}
 async function runCanvasEdge(id) {
-  const edge = canvasEdge(id); if (!edge || canvasEdgeStatus(edge).busy) return;
-  const error = edgeValidation(edge); if (error) return toast(error, true);
-  // Build the request now: editing a node later cannot alter submitted jobs.
-  const spec = copyCanvasValue(edgeSpec(edge));
-  edge.submitting = true; edge.error = ""; edge.jobIds = []; edge.lastSignature = edgeSignature(edge);
-  renderCanvas();
-  try {
-    edge.jobIds = await window.studio.submit(spec);
-    toast(`已启动 ${canvasNode(edge.benchmarkNodeId).title} → ${canvasNode(edge.gpuNodeId).title}，共 ${edge.jobIds.length} 个任务。`);
-  } catch (error) { edge.error = error.message; toast(error.message, true); }
-  finally { edge.submitting = false; renderCanvas(); persistWorkbench(); }
+  const graph = state.canvas, edge = canvasEdge(id, graph);
+  if (edge) await submitCanvasEdges(graph, [edge]);
+}
+async function runCanvasNode(id) {
+  const graph = state.canvas;
+  await submitCanvasEdges(graph, CanvasGraph.connectedEdges(graph, id));
 }
 async function runAllCanvasEdges() {
-  const ready = state.canvas.edges.filter(e => !canvasEdgeStatus(e).busy && !edgeValidation(e));
-  if (!ready.length) return toast("添加模块并连接后即可运行。", true);
-  for (const edge of ready) await runCanvasEdge(edge.id);
+  const graph = state.canvas;
+  await submitCanvasEdges(graph, [...graph.edges]);
+}
+function renderCanvasTabs() {
+  $("canvas-tabs").innerHTML = state.canvases.map(graph => {
+    const busy = graph.edges.some(e => canvasEdgeStatus(e).busy);
+    const locked = busy || state.canvases.length < 2;
+    const closeHint = busy ? "实验正在提交或执行，结束后可以关闭" : state.canvases.length < 2 ? "至少保留一张画布" : `关闭 ${graph.name}（移除模块和连线，保留历史实验）`;
+    return `<div class="canvas-tab ${graph.id === state.activeCanvasId ? "active" : ""}" role="presentation"><button role="tab" aria-selected="${graph.id === state.activeCanvasId}" data-canvas-tab="${graph.id}" title="${escapeHTML(graph.name)} · 右键打开画布设置">${busy ? '<i class="run-spinner"></i>' : studioIcon('workspace')} <span>${escapeHTML(graph.name)}</span><small>${graph.edges.length}</small></button><button class="canvas-tab-close" data-close-canvas="${graph.id}" aria-label="关闭 ${escapeHTML(graph.name)}" title="${escapeHTML(closeHint)}" ${locked ? "disabled" : ""}>×</button></div>`;
+  }).join("");
+}
+function switchCanvas(id) {
+  const graph = state.canvases.find(c => c.id === id); if (!graph) return;
+  closeCanvasContext(); releaseCanvasPointer(); canvasConnecting = null; canvasConnectMode = false;
+  state.canvasEditing = null; state.canvas = graph; state.activeCanvasId = id;
+  renderCanvas(); persistWorkbench();
+}
+function newCanvas() {
+  let number = state.canvases.length + 1;
+  while (state.canvases.some(c => c.name === `画布 ${number}`)) number++;
+  $("new-canvas-name").value = `画布 ${number}`;
+  $("new-canvas-dialog").showModal();
+  $("new-canvas-name").focus(); $("new-canvas-name").select();
+}
+function createCanvas(name) {
+  const graph = { ...CanvasGraph.empty(), id: crypto.randomUUID(), name: name.trim().slice(0, 60) };
+  if (!graph.name) return;
+  state.canvases.push(graph); switchCanvas(graph.id);
+}
+function closeCanvas(id) {
+  const index = state.canvases.findIndex(c => c.id === id), graph = state.canvases[index];
+  if (!graph || state.canvases.length < 2 || graph.edges.some(e => canvasEdgeStatus(e).busy)) return false;
+  state.canvases.splice(index, 1);
+  if (id === state.activeCanvasId) switchCanvas(state.canvases[Math.min(index, state.canvases.length - 1)].id);
+  else { renderCanvas(); persistWorkbench(); }
+  return true;
+}
+function openCanvasDetails() {
+  $("canvas-name").value = state.canvas.name;
+  const busy = state.canvas.edges.some(e => canvasEdgeStatus(e).busy);
+  $("delete-canvas").disabled = state.canvases.length < 2 || busy;
+  $("canvas-delete-hint").textContent = busy ? "当前画布有实验正在提交或执行，结束后可以删除。" : "删除会移除当前画布的模块和连线；历史实验记录保留。至少保留一张画布。";
+  $("canvas-details").showModal();
 }
 function canvasStatusMarkup(status) {
   return `<span class="canvas-status ${status.phase}">${status.busy ? '<i class="run-spinner"></i>' : status.phase === "completed" ? "✓ " : ""}${escapeHTML(status.label)}</span>`;
@@ -136,7 +195,8 @@ function canvasNodeDescription(node) {
 function renderCanvasNodes() {
   $("canvas-nodes").innerHTML = state.canvas.nodes.map(node => {
     const status = canvasNodeStatus(node);
-    return `<article class="canvas-node ${node.kind} ${status.phase} ${canvasConnecting === node.id ? "connecting" : ""}" data-node="${node.id}" style="left:${node.x}px;top:${node.y}px"><div class="canvas-node-header"><span class="node-kind-icon">${node.kind === "benchmark" ? "▦" : "▧"}</span><span>${node.kind === "benchmark" ? "测试程序" : "GPU 配置"}</span><button data-remove-node="${node.id}" aria-label="删除 ${escapeHTML(node.title)}" ${status.busy ? "disabled" : ""}>×</button></div><button class="canvas-node-edit" data-edit-node="${node.id}"><strong>${escapeHTML(node.title)}</strong><small>${escapeHTML(canvasNodeDescription(node))}</small><span>${node.kind === "benchmark" ? "点击调整规模与参数" : "点击展开 GPU 架构"} ↗</span></button><div class="canvas-node-footer">${canvasStatusMarkup(status)}<small>${node.kind === "benchmark" ? "程序输出" : "配置输入"}</small></div><button class="node-port ${node.kind === "benchmark" ? "output" : "input"}" data-node-port="${node.id}" aria-label="连接 ${escapeHTML(node.title)}" title="点击或拖动圆点连接"></button></article>`;
+    const edges = CanvasGraph.connectedEdges(state.canvas, node.id), ready = edges.filter(e => !canvasEdgeStatus(e).busy && !edgeValidation(e));
+    return `<article class="canvas-node ${node.kind} ${status.phase} ${canvasConnecting === node.id ? "connecting" : ""}" data-node="${node.id}" style="left:${node.x}px;top:${node.y}px"><div class="canvas-node-header"><span class="node-kind-icon">${studioIcon(node.kind === "benchmark" ? "program" : "chip")}</span><span>${node.kind === "benchmark" ? "测试程序" : "GPU 配置"}</span><button data-remove-node="${node.id}" aria-label="删除 ${escapeHTML(node.title)}" ${status.busy ? "disabled" : ""}>${studioIcon("close")}</button></div><button class="canvas-node-edit" data-edit-node="${node.id}"><strong>${escapeHTML(node.title)}</strong><small>${escapeHTML(canvasNodeDescription(node))}</small><span>${node.kind === "benchmark" ? "点击调整规模与参数" : "点击展开 GPU 架构"} ↗</span></button><div class="canvas-node-footer">${canvasStatusMarkup(status)}<button class="node-run-all" data-run-node="${node.id}" ${ready.length ? "" : "disabled"} title="运行此模块连接的全部就绪实验；跳过正在执行的连接">${studioIcon("play")}<span>运行连接 (${ready.length}/${edges.length})</span></button></div><button class="node-port ${node.kind === "benchmark" ? "output" : "input"}" data-node-port="${node.id}" aria-label="连接 ${escapeHTML(node.title)}" title="点击或拖动圆点连接"></button></article>`;
   }).join("");
 }
 function canvasEdgeGeometry(edge) {
@@ -175,8 +235,16 @@ function updateCanvasTransform() {
   $("canvas-viewport").style.backgroundSize = `${24 * v.zoom}px ${24 * v.zoom}px`;
 }
 function renderCanvasSummary() {
+  $("canvas-active-name").textContent = state.canvas.name || "实验画布";
   const edges = state.canvas.edges;
   let count = 0, readyCount = 0;
+  $("canvas-connection-list").hidden = !state.runPanelExpanded;
+  $("toggle-run-panel").setAttribute("aria-expanded", String(state.runPanelExpanded));
+  $("run-panel-toggle-label").textContent = state.runPanelExpanded ? "收起连接" : "展开连接";
+  $("run-panel-chevron").textContent = state.runPanelExpanded ? "⌄" : "⌃";
+  $("toggle-run-panel").title = state.runPanelExpanded ? "收起实验连接" : "展开实验连接";
+  const statuses = edges.map(canvasEdgeStatus), running = statuses.filter(status => status.busy).length;
+  $("floating-run-progress").textContent = running ? `${running} 条执行中` : "";
   $("canvas-connection-list").innerHTML = edges.map(edge => {
     const a = canvasNode(edge.benchmarkNodeId), b = canvasNode(edge.gpuNodeId), status = canvasEdgeStatus(edge), error = edgeValidation(edge);
     const benchmark = state.info?.benchmarks.find(p => p.id === a?.sourceId);
@@ -190,10 +258,11 @@ function renderCanvasSummary() {
   $("canvas-count").textContent = `${state.canvas.nodes.length} 个模块 · ${edges.length} 条连接`;
   $("canvas-connect").classList.toggle("selected", canvasConnectMode || Boolean(canvasConnecting));
   $("canvas-connect").setAttribute("aria-pressed", String(canvasConnectMode || Boolean(canvasConnecting)));
-  $("canvas-mode-hint").textContent = canvasConnecting ? "点击另一类模块的圆点完成连接 · Esc 取消" : canvasConnectMode ? "依次点击程序和 GPU 方块连接" : "拖动方块 · 拖动空白平移 · 滚轮缩放";
+  $("canvas-mode-hint").textContent = canvasConnecting ? "点击另一类模块完成连接 · 点击空白或 Esc 取消" : canvasConnectMode ? "依次点击程序和 GPU · 点击空白取消" : "拖动方块 · 拖动空白平移 · 滚轮缩放";
 }
 function renderCanvas() {
   if (!$("canvas-viewport")) return;
+  renderCanvasTabs(); renderWorkspaceActivity();
   state.canvas.viewport ||= CanvasGraph.empty().viewport;
   // A persisted submission is never resumed automatically after a crash.
   if (!canvasPointer) renderCanvasNodes();
@@ -213,10 +282,10 @@ function renderCanvasPicker() {
   const search = $("canvas-picker-search").value.toLowerCase().trim();
   if (canvasPickerKind === "benchmark") {
     const list = (state.info?.benchmarks || state.fallbackBenchmarks).filter(p => `${p.name} ${p.description}`.toLowerCase().includes(search));
-    $("canvas-picker-list").innerHTML = list.map(b => `<button class="picker-item" data-pick-benchmark="${escapeHTML(b.id)}" ${b.available ? "" : "disabled"}><span class="picker-icon program">▦</span><span><strong>${escapeHTML(b.name)}</strong><small>${escapeHTML(b.description)}</small></span><em>${b.available ? "＋ 添加" : "到商店下载"}</em></button>`).join("") || '<p class="helper">没有匹配的程序，可以到商店安装或添加自定义程序。</p>';
+    $("canvas-picker-list").innerHTML = list.map(b => `<button class="picker-item" data-pick-benchmark="${escapeHTML(b.id)}" ${b.available ? "" : "disabled"}><span class="picker-icon program">${studioIcon("program")}</span><span><strong>${escapeHTML(b.name)}</strong><small>${escapeHTML(b.description)}</small></span><em>${b.available ? "＋ 添加" : "到商店下载"}</em></button>`).join("") || '<p class="helper">没有匹配的程序，可以到商店安装或添加自定义程序。</p>';
   } else {
     const list = allGpuModules().filter(p => `${p.name} ${p.id}`.toLowerCase().includes(search));
-    $("canvas-picker-list").innerHTML = `<button class="picker-item custom-picker" data-pick-custom-gpu><span class="picker-icon">＋</span><span><strong>空白自定义 GPU</strong><small>添加空白架构模块，逐项配置</small></span><em>＋ 添加</em></button>` + list.map(p => `<button class="picker-item" data-pick-gpu="${escapeHTML(p.id)}" ${p.supported ? "" : "disabled"}><span class="picker-icon">▧</span><span><strong>${escapeHTML(p.name)}</strong><small>${escapeHTML(p.id)} · ${p.custom ? "自定义模板" : `${p.sms} SM`}</small></span><em>${p.supported ? "＋ 添加" : "CUDA 不兼容"}</em></button>`).join("");
+    $("canvas-picker-list").innerHTML = `<button class="picker-item custom-picker" data-pick-custom-gpu><span class="picker-icon">＋</span><span><strong>空白自定义 GPU</strong><small>添加空白架构模块，逐项配置</small></span><em>＋ 添加</em></button>` + list.map(p => `<button class="picker-item" data-pick-gpu="${escapeHTML(p.id)}" ${p.supported ? "" : "disabled"}><span class="picker-icon">${studioIcon("chip")}</span><span><strong>${escapeHTML(p.name)}</strong><small>${escapeHTML(p.id)} · ${p.custom ? "自定义模板" : `${p.sms} SM`}</small></span><em>${p.supported ? "＋ 添加" : "CUDA 不兼容"}</em></button>`).join("");
   }
 }
 function closeCanvasContext() { $("canvas-context").hidden = true; canvasContextEdge = null; }
@@ -257,7 +326,69 @@ function updatePreviewLine(event) {
   const x = node.x + (node.kind === "benchmark" ? CanvasGraph.nodeWidth : 0), y = node.y + CanvasGraph.nodeHeight / 2;
   line.setAttribute("d", `M ${x} ${y} C ${x + (node.kind === "benchmark" ? 90 : -90)} ${y}, ${end.x - 80} ${end.y}, ${end.x} ${end.y}`);
 }
+function releaseCanvasPointer() {
+  const previous = canvasPointer;
+  canvasPointer = null;
+  const viewport = $("canvas-viewport");
+  viewport?.classList.remove("is-panning", "is-dragging-node");
+  if (previous?.pointerId !== undefined && viewport?.hasPointerCapture(previous.pointerId)) viewport.releasePointerCapture(previous.pointerId);
+  return previous;
+}
+function cancelCanvasGesture() {
+  const previous = releaseCanvasPointer();
+  canvasConnecting = null; canvasConnectMode = false;
+  if (previous) canvasIgnoreClickUntil = Date.now() + 150;
+  renderCanvas();
+  if (previous) persistWorkbench();
+}
+function renderWorkspaceActivity() {
+  const active = state.jobs.filter(j => ["preparing", "compiling", "running", "cancelling"].includes(j.status));
+  const queued = state.jobs.filter(j => j.status === "queued").length;
+  $("workspace-activity-count").textContent = `运行 ${active.length}`;
+  $("workspace-active-jobs").innerHTML = active.map(job => {
+    const name = job.benchmarkName || job.benchmark;
+    const detail = `${name} · ${job.workloadLabel || `规模 ${job.size}`} → ${job.profileName} · ${job.canvasName || "实验"} · ${labels[job.status] || job.status}`;
+    return `<button class="workspace-task" data-workspace-job="${escapeHTML(job.id)}" title="${escapeHTML(detail)}"><i class="run-spinner"></i><strong>${escapeHTML(name)}</strong><span>→ ${escapeHTML(job.profileName)}</span><em>${escapeHTML(labels[job.status] || job.status)}</em></button>`;
+  }).join("") || '<span class="workspace-idle">暂无运行任务</span>';
+  $("workspace-queue").hidden = !queued;
+  $("workspace-queue").textContent = `排队 ${queued}`;
+}
 function setupCanvas() {
+  if (!state.canvases.length) {
+    state.canvases = CanvasGraph.restoreCanvases({ canvas: state.canvas }, () => crypto.randomUUID());
+    state.canvas = state.canvases[0]; state.activeCanvasId = state.canvas.id;
+  }
+  $("new-canvas").onclick = newCanvas;
+  $("cancel-new-canvas").onclick = () => $("new-canvas-dialog").close();
+  $("new-canvas-form").onsubmit = event => {
+    event.preventDefault(); const name = $("new-canvas-name").value.trim();
+    if (!name) return toast("请填写画布名称。", true);
+    $("new-canvas-dialog").close(); createCanvas(name);
+  };
+  $("toggle-run-panel").onclick = () => { state.runPanelExpanded = !state.runPanelExpanded; renderCanvasSummary(); persistWorkbench(); };
+  $("workspace-active-jobs").onclick = event => { const job = event.target.closest("[data-workspace-job]"); if (job) openJob(job.dataset.workspaceJob); };
+  $("workspace-queue").onclick = () => showView("results");
+  $("workspace-environment").onclick = () => showView("environment");
+  $("canvas-tabs").onclick = event => {
+    const close = event.target.closest("[data-close-canvas]");
+    if (close) { closeCanvas(close.dataset.closeCanvas); return; }
+    const tab = event.target.closest("[data-canvas-tab]"); if (tab) switchCanvas(tab.dataset.canvasTab);
+  };
+  $("canvas-tabs").oncontextmenu = event => {
+    const tab = event.target.closest(".canvas-tab")?.querySelector("[data-canvas-tab]");
+    if (!tab) return;
+    event.preventDefault(); switchCanvas(tab.dataset.canvasTab); openCanvasDetails();
+  };
+  $("canvas-details-button").onclick = openCanvasDetails;
+  $("close-canvas-details").onclick = () => $("canvas-details").close();
+  $("canvas-details-form").onsubmit = event => {
+    event.preventDefault(); const name = $("canvas-name").value.trim();
+    if (!name) return toast("请填写画布名称。", true);
+    state.canvas.name = name.slice(0, 60); $("canvas-details").close(); renderCanvas(); persistWorkbench();
+  };
+  $("delete-canvas").onclick = () => {
+    if (closeCanvas(state.activeCanvasId)) $("canvas-details").close();
+  };
   $("add-benchmark-node").onclick = $("canvas-empty-add").onclick = () => showCanvasPicker("benchmark");
   $("add-gpu-node").onclick = () => showCanvasPicker("gpu");
   $("close-canvas-picker").onclick = () => $("canvas-picker").close();
@@ -268,60 +399,90 @@ function setupCanvas() {
     if (gpu && !gpu.disabled) { addCanvasGpu(gpu.dataset.pickGpu); $("canvas-picker").close(); }
     if (custom) { $("canvas-picker").close(); const node = addCanvasGpu(null); openCanvasNode(node.id); }
   };
-  $("canvas-settings-button").onclick = () => $("canvas-settings").showModal();
+  initCpuSettings();
+  $("canvas-settings-button").onclick = () => { renderCpuSettings(); $("canvas-settings").showModal(); };
   $("close-canvas-settings").onclick = $("save-canvas-settings").onclick = () => { $("canvas-settings").close(); renderCanvas(); persistWorkbench(); };
   $("canvas-connect").onclick = () => { canvasConnecting = null; canvasConnectMode = !canvasConnectMode; renderCanvas(); };
   $("canvas-fit").onclick = () => { const rect = $("canvas-viewport").getBoundingClientRect(); state.canvas.viewport = CanvasGraph.fit(state.canvas.nodes, rect.width, rect.height); renderCanvas(); persistWorkbench(); };
   function zoomCanvas(factor) { const rect = $("canvas-viewport").getBoundingClientRect(); state.canvas.viewport = CanvasGraph.zoomAt(state.canvas.viewport, rect.width / 2, rect.height / 2, state.canvas.viewport.zoom * factor); updateCanvasTransform(); persistWorkbench(); }
   $("canvas-zoom-in").onclick = () => zoomCanvas(1.15); $("canvas-zoom-out").onclick = () => zoomCanvas(1 / 1.15);
   const viewport = $("canvas-viewport");
-  viewport.addEventListener("wheel", event => { event.preventDefault(); closeCanvasContext(); const point = pointerInCanvas(event); state.canvas.viewport = CanvasGraph.zoomAt(state.canvas.viewport, point.x, point.y, state.canvas.viewport.zoom * Math.exp(-event.deltaY * 0.0012)); updateCanvasTransform(); persistWorkbench(); }, { passive: false });
+  viewport.addEventListener("wheel", event => {
+    event.preventDefault();
+    if (event.target.closest("[data-canvas-ui]")) return;
+    closeCanvasContext();
+    const point = pointerInCanvas(event);
+    state.canvas.viewport = CanvasGraph.zoomAt(state.canvas.viewport, point.x, point.y, state.canvas.viewport.zoom * Math.exp(-event.deltaY * 0.0012));
+    updateCanvasTransform(); persistWorkbench();
+  }, { passive: false });
+  // Browser text/image dragging must never take ownership of a canvas gesture.
+  viewport.addEventListener("dragstart", event => event.preventDefault());
+  viewport.addEventListener("selectstart", event => event.preventDefault());
   viewport.onpointerdown = event => {
-    if (event.button !== 0 && event.button !== 1) return;
+    if ((event.button !== 0 && event.button !== 1) || event.isPrimary === false) return;
+    if (event.target.closest("[data-canvas-ui], [data-edge-control]")) return;
     closeCanvasContext();
     const port = event.target.closest("[data-node-port]");
     if (port) {
       event.preventDefault();
-      if (canvasConnecting && canvasConnecting !== port.dataset.nodePort) { connectCanvasNodes(canvasConnecting, port.dataset.nodePort); canvasPointer = null; }
-      else { canvasConnecting = port.dataset.nodePort; canvasPointer = { kind: "link", x: event.clientX, y: event.clientY }; renderCanvas(); }
+      if (canvasConnecting && canvasConnecting !== port.dataset.nodePort) {
+        releaseCanvasPointer(); connectCanvasNodes(canvasConnecting, port.dataset.nodePort);
+      } else {
+        canvasConnecting = port.dataset.nodePort;
+        canvasPointer = { kind: "link", pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
+        viewport.setPointerCapture(event.pointerId); renderCanvas();
+      }
       return;
     }
     if (event.target.closest("button") && !event.target.closest(".canvas-node-edit")) return;
     const element = event.target.closest("[data-node]");
-    if (element && (canvasConnectMode || canvasConnecting)) return;
+    if (element && (canvasConnectMode || canvasConnecting)) { event.preventDefault(); return; }
     if (element && event.button === 0) {
       const node = canvasNode(element.dataset.node);
-      canvasPointer = { kind: "node", id: node.id, x: event.clientX, y: event.clientY, nodeX: node.x, nodeY: node.y, moved: false };
-    } else if (!element) canvasPointer = { kind: "pan", x: event.clientX, y: event.clientY, viewX: state.canvas.viewport.x, viewY: state.canvas.viewport.y, moved: false };
-    else return;
+      canvasPointer = { kind: "node", pointerId: event.pointerId, id: node.id, x: event.clientX, y: event.clientY, nodeX: node.x, nodeY: node.y, moved: false };
+      viewport.classList.add("is-dragging-node");
+    } else if (!element) {
+      canvasPointer = { kind: "pan", pointerId: event.pointerId, x: event.clientX, y: event.clientY, viewX: state.canvas.viewport.x, viewY: state.canvas.viewport.y, moved: false };
+      viewport.classList.add("is-panning");
+    } else return;
+    event.preventDefault(); window.getSelection()?.removeAllRanges();
     viewport.setPointerCapture(event.pointerId);
   };
   window.addEventListener("pointermove", event => {
     if (canvasConnecting) updatePreviewLine(event);
-    if (!canvasPointer || canvasPointer.kind === "link") return;
+    if (!canvasPointer || canvasPointer.pointerId !== event.pointerId) return;
+    if (!event.buttons) { cancelCanvasGesture(); return; }
     const dx = event.clientX - canvasPointer.x, dy = event.clientY - canvasPointer.y;
     if (Math.abs(dx) + Math.abs(dy) > 4) canvasPointer.moved = true;
+    if (canvasPointer.kind === "link") return;
     if (canvasPointer.kind === "node") {
-      const node = canvasNode(canvasPointer.id); if (!node) return;
+      const node = canvasNode(canvasPointer.id); if (!node) { cancelCanvasGesture(); return; }
       node.x = Math.round(canvasPointer.nodeX + dx / state.canvas.viewport.zoom); node.y = Math.round(canvasPointer.nodeY + dy / state.canvas.viewport.zoom);
       const element = document.querySelector(`[data-node="${node.id}"]`); if (element) { element.style.left = node.x + "px"; element.style.top = node.y + "px"; }
       renderCanvasEdges();
     } else { state.canvas.viewport.x = canvasPointer.viewX + dx; state.canvas.viewport.y = canvasPointer.viewY + dy; updateCanvasTransform(); }
   });
   window.addEventListener("pointerup", event => {
-    if (!canvasPointer) return;
-    const clickedNode = canvasPointer.kind === "node" && !canvasPointer.moved ? canvasPointer.id : null;
-    if (canvasPointer.kind === "link" && Math.abs(event.clientX - canvasPointer.x) + Math.abs(event.clientY - canvasPointer.y) > 4) {
+    if (!canvasPointer || canvasPointer.pointerId !== event.pointerId) return;
+    const pointer = releaseCanvasPointer();
+    const clickedNode = pointer.kind === "node" && !pointer.moved ? pointer.id : null;
+    if (pointer.kind === "link" && pointer.moved) {
       const target = document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-node]");
       if (target && target.dataset.node !== canvasConnecting) connectCanvasNodes(canvasConnecting, target.dataset.node);
-      canvasIgnoreClickUntil = Date.now() + 150;
-    } else if (canvasPointer.moved) canvasIgnoreClickUntil = Date.now() + 150;
-    if (clickedNode) canvasIgnoreClickUntil = Date.now() + 150;
-    canvasPointer = null; renderCanvas(); persistWorkbench();
+      else { canvasConnecting = null; canvasConnectMode = false; }
+    }
+    if (pointer.kind === "pan" && !pointer.moved) { canvasConnecting = null; canvasConnectMode = false; }
+    if (pointer.moved || clickedNode) canvasIgnoreClickUntil = Date.now() + 150;
+    renderCanvas(); persistWorkbench();
     if (clickedNode) openCanvasNode(clickedNode);
   });
+  viewport.addEventListener("pointercancel", event => { if (canvasPointer?.pointerId === event.pointerId) cancelCanvasGesture(); });
+  viewport.addEventListener("lostpointercapture", event => { if (canvasPointer?.pointerId === event.pointerId) cancelCanvasGesture(); });
+  window.addEventListener("blur", () => { if (canvasPointer || canvasConnecting) cancelCanvasGesture(); });
   viewport.onclick = event => {
     if (Date.now() < canvasIgnoreClickUntil || event.target.closest("[data-node-port]")) return;
+    const runNode = event.target.closest("[data-run-node]");
+    if (runNode) { runCanvasNode(runNode.dataset.runNode); return; }
     const remove = event.target.closest("[data-remove-node]");
     if (remove) { const node = canvasNode(remove.dataset.removeNode); if (node && !canvasNodeStatus(node).busy) { CanvasGraph.remove(state.canvas, node.id); if (canvasConnecting === node.id) canvasConnecting = null; renderCanvas(); persistWorkbench(); } return; }
     const run = event.target.closest("[data-run-edge]"), options = event.target.closest("[data-edge-options]");
@@ -332,6 +493,8 @@ function setupCanvas() {
       if (canvasConnecting && canvasConnecting !== node.dataset.node) connectCanvasNodes(canvasConnecting, node.dataset.node);
       else if (canvasConnectMode) { canvasConnecting = node.dataset.node; renderCanvas(); }
       else openCanvasNode(node.dataset.node);
+    } else if (!event.target.closest("[data-canvas-ui], [data-edge-control], [data-edge-line], button")) {
+      canvasConnecting = null; canvasConnectMode = false; renderCanvas();
     }
   };
   function contextOnEdge(event) { const el = event.target.closest("[data-edge-control], [data-edge-line], [data-run-edge], [data-edge-options]"); if (!el) return; event.preventDefault(); openCanvasContext(el.dataset.edgeControl || el.dataset.edgeLine || el.dataset.runEdge || el.dataset.edgeOptions, event.clientX, event.clientY); }
@@ -344,7 +507,7 @@ function setupCanvas() {
     if (focus) focusCanvasEdge(focus.dataset.focusEdge);
   };
   document.addEventListener("pointerdown", event => { if (!event.target.closest("#canvas-context") && !event.target.closest("[data-edge-options]")) closeCanvasContext(); });
-  document.addEventListener("keydown", event => { if (event.key === "Escape") { canvasConnecting = null; canvasConnectMode = false; canvasPointer = null; closeCanvasContext(); renderCanvas(); } });
+  document.addEventListener("keydown", event => { if (event.key === "Escape") { releaseCanvasPointer(); canvasConnecting = null; canvasConnectMode = false; closeCanvasContext(); renderCanvas(); } });
   $("save-edge-repeat").onclick = saveCanvasRepeat;
   document.querySelectorAll("[data-edge-repeat]").forEach(button => button.onclick = () => { $("edge-repeats").value = button.dataset.edgeRepeat; saveCanvasRepeat(); });
   $("context-run-edge").onclick = () => { const id = canvasContextEdge; saveCanvasRepeat(); if ($("canvas-context").hidden) runCanvasEdge(id); };

@@ -4,6 +4,17 @@ body.canvas-view main { height:calc(100vh - 42px); display:flex; flex-direction:
 body.canvas-view .page-header { flex-shrink:0; }
 #view-workbench:not([hidden]) { flex:1; min-height:0; display:flex; flex-direction:column; }
 .canvas-toolbar { flex-shrink:0; }
+.canvas-tabbar { display:flex; align-items:center; gap:8px; flex-shrink:0; margin-bottom:10px; min-width:0; }
+#canvas-tabs { display:flex; gap:6px; overflow-x:auto; flex:1; min-width:0; padding-bottom:3px; }
+#canvas-tabs button { display:flex; align-items:center; gap:7px; flex-shrink:0; padding:9px 12px; border:1px solid #dce5ed; border-radius:7px; background:#eef2f6; color:#7890a1; font-size:11px; }
+#canvas-tabs button[aria-selected="true"] { color:#167d72; background:white; border-color:#75b7a4; }
+#canvas-tabs button span { max-width:150px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#canvas-tabs small { background:#e4eeea; padding:1px 5px; border-radius:4px; }
+.canvas-tabbar > button { white-space:nowrap; font-size:10px; }
+.canvas-details-form { width:400px; padding:26px; }
+.canvas-details-form label { display:grid; gap:8px; margin:20px 0; }
+.node-run-all { border:1px solid #cce4d8; color:#318568; background:#edf7f1; border-radius:4px; font:9px var(--font); padding:5px 6px; cursor:pointer; }
+.node-run-all:disabled { opacity:.5; cursor:default; }
 .canvas-add-buttons,.canvas-tools { display:flex; align-items:center; gap:9px; }
 .canvas-toolbar button { white-space:nowrap; font-size:11px; padding:10px 13px; }
 .canvas-tools .selected { background:#eaf5f0; color:#147b78; border-color:#83b8aa; }
@@ -108,6 +119,15 @@ body.canvas-view .page-header { flex-shrink:0; }
 .picker-item em { font-style:normal; font-size:10px; color:#77a491; margin-left:auto; white-space:nowrap; }
 .custom-picker { border-style:dashed; }
 #canvas-settings { width:600px; }
+.cpu-settings { margin-top:20px; padding:16px; border:1px solid #dce7ee; border-radius:12px; background:#f5f9fc; }
+.cpu-heading, .cpu-actions { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.cpu-heading strong { font-size:13px; color:#24475c; }
+#cpu-summary { font-size:13px; line-height:1.7; color:#24475c; margin:10px 0; }
+.cpu-settings .helper { font-size:11px; line-height:1.7; margin:8px 0 0; }
+.cpu-actions { margin-top:14px; flex-wrap:wrap; }
+.cpu-toggle { display:flex; align-items:center; gap:8px; font-size:12px; color:#24475c; cursor:pointer; }
+.cpu-toggle input { width:16px; height:16px; margin:0; accent-color:#117fa6; }
+.cpu-actions button { font-size:11px; }
 .canvas-settings-fields { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin:25px 0; }
 .canvas-settings-fields label { font-size:11px; color:#668295; }
 .canvas-settings-fields input { width:100%; margin-top:9px; }

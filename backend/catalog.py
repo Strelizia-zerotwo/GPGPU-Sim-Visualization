@@ -1,4 +1,4 @@
-"""PolyBench/GPU CUDA catalog and explicit custom benchmark registrations."""
+"""CUDA ecosystem source catalog, executable adapters, and custom registrations."""
 import hashlib
 import json
 from pathlib import Path
@@ -11,6 +11,42 @@ PREFIX = "src/cuda/polybench-gpu-1.0"
 
 
 BENCHMARKS = json.loads((Path(__file__).parent / "polybench.json").read_text(encoding="utf-8"))
+COLLECTIONS = json.loads((Path(__file__).parent / "collections.json").read_text(encoding="utf-8"))
+BUILTINS = {**BENCHMARKS, **COLLECTIONS}
+
+
+def source_location(apps_root, descriptor):
+    apps = Path(apps_root)
+    if descriptor["kind"] == "builtin":
+        return apps / PREFIX / "CUDA" / descriptor["folder"] / descriptor["file"]
+    if descriptor["kind"] == "collection":
+        return apps / descriptor["sourceDir"] / (descriptor.get("file") or descriptor["markerFile"])
+    return Path(descriptor["sourceRoot"]) / descriptor["file"]
+
+
+def download_paths(identifiers):
+    if not identifiers or any(i not in BUILTINS for i in identifiers):
+        raise ValueError("请选择 Benchmark 商店中的程序或套件。")
+    folders = set()
+    for identifier in identifiers:
+        descriptor = BUILTINS[identifier]
+        if descriptor["kind"] == "builtin":
+            folders.update([PREFIX + "/common", PREFIX + "/CUDA/" + descriptor["folder"]])
+        else:
+            folders.add(descriptor["sourceDir"])
+            # Keep shared source/build support beside per-program downloads.
+            for prefix, dependencies in {
+                "src/cuda/rodinia/3.1/": ["src/cuda/rodinia/3.1/common"],
+                "src/cuda/parboil/": ["src/cuda/parboil/common", "src/cuda/parboil/driver"],
+                "src/cuda/lonestargpu-2.0/": ["src/cuda/lonestargpu-2.0/include"],
+                "src/cuda/pannotia/": ["src/cuda/pannotia/common", "src/cuda/pannotia/graph_parser"],
+                "src/cuda/shoc-master/": ["src/cuda/shoc-master/src/common"],
+                "src/cuda/ispass-2009/": ["src/cuda/ispass-2009/LIB"],
+                "src/cuda/NVIDIA_CUDA-11.0_Samples/": ["src/cuda/NVIDIA_CUDA-11.0_Samples/common"],
+            }.items():
+                if descriptor["sourceDir"].startswith(prefix):
+                    folders.update(dependencies)
+    return sorted(folders)
 
 
 def registry_path(apps_root):
@@ -38,7 +74,7 @@ def save_custom(apps_root, entries):
 
 
 def descriptors(apps_root):
-    entries = dict(BENCHMARKS)
+    entries = dict(BUILTINS)
     for custom in load_custom(apps_root):
         entries[custom["id"]] = custom
     return entries
@@ -48,16 +84,21 @@ def catalog(apps_root):
     apps = Path(apps_root)
     result = []
     for identifier, descriptor in descriptors(apps).items():
+        source = source_location(apps, descriptor)
+        downloaded = source.is_file()
+        if descriptor.get("submodule"):
+            root = apps / descriptor["sourceDir"]
+            downloaded = root.is_dir() and any(p.name != ".git" for p in root.iterdir())
+        runnable = descriptor.get("runnable", True)
+        available = downloaded and runnable
         if descriptor["kind"] == "builtin":
-            source = apps / PREFIX / "CUDA" / descriptor["folder"] / descriptor["file"]
-            available = source.is_file() and (apps / PREFIX / "common/polybenchUtilFuncts.h").is_file()
-        else:
-            source = Path(descriptor["sourceRoot"]) / descriptor["file"]
-            available = source.is_file()
-        result.append({**descriptor, "id": identifier, "source": str(source), "available": available,
+            available &= (apps / PREFIX / "common/polybenchUtilFuncts.h").is_file()
+            downloaded = available
+        result.append({**descriptor, "id": identifier, "suite": descriptor.get("suite", "PolyBench/GPU" if descriptor["kind"] == "builtin" else "自定义程序"),
+                       "source": str(source), "available": available, "downloaded": downloaded, "runnable": runnable,
                        "parameters": editable_parameters(descriptor, source.read_text()) if available else [],
-                       "adaptationNote": "包含初始化 / 网格修复，具体修改见任务的源码差异" if identifier in {"2mm","3mm","atax","gesummv","corr","covar"} else "规模设置与 CUDA 同步 API 适配",
-                       "sourceURL": descriptor.get("repoURL", APPS_URL if descriptor["kind"] == "builtin" else "本地源码"),
+                       "adaptationNote": descriptor.get("requirements") or ("包含初始化 / 网格修复，具体修改见任务的源码差异" if identifier in {"2mm","3mm","atax","gesummv","corr","covar"} else "规模设置与 CUDA 同步 API 适配"),
+                       "sourceURL": descriptor.get("repoURL", APPS_URL if descriptor["kind"] in {"builtin", "collection"} else "本地源码"),
                        "sizeLabel": " = ".join(descriptor.get("macros", [])) if descriptor["mode"] == "macros" else "运行参数中的 {size}"})
     return result
 

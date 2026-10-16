@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import time
 from uuid import uuid4
-from catalog import (APPS_URL, PREFIX, BENCHMARKS, registry_path, load_custom,
+from catalog import (APPS_URL, PREFIX, BENCHMARKS, BUILTINS, download_paths, source_location, registry_path, load_custom,
                      save_custom, validate_registration, validate_github_url, validate_ref)
 
 SIM_URL = "https://github.com/gpgpu-sim/gpgpu-sim_distribution.git"
@@ -45,8 +45,7 @@ def execute(request, cancel, emit, run_command, absolute_path, inspect_environme
             raise ValueError(f"{stage} 失败（退出码 {code}），请查看部署/下载日志。")
 
     def install(identifiers):
-        if not identifiers or any(i not in BENCHMARKS for i in identifiers):
-            raise ValueError("请选择 PolyBench CUDA 套件中的程序。")
+        folders = download_paths(identifiers)
         if not shutil.which("git"):
             raise ValueError("Linux 中未安装 git。请先安装编译依赖。")
         if not apps.exists():
@@ -56,11 +55,15 @@ def execute(request, cancel, emit, run_command, absolute_path, inspect_environme
             raise ValueError("目标目录已存在且不是 Git 仓库。请使用新的下载目录，或添加为自定义本地程序。")
         sparse = subprocess.run(["git", "-C", str(apps), "config", "--bool", "core.sparseCheckout"], capture_output=True, text=True)
         if sparse.stdout.strip() == "true":
-            folders = [PREFIX + "/common"] + [PREFIX + "/CUDA/" + BENCHMARKS[i]["folder"] for i in identifiers]
             command(["git", "-C", str(apps), "sparse-checkout", "add", *folders], apps, "download")
         for identifier in identifiers:
-            descriptor = BENCHMARKS[identifier]
-            if not (apps / PREFIX / "CUDA" / descriptor["folder"] / descriptor["file"]).is_file():
+            descriptor = BUILTINS[identifier]
+            if descriptor.get("submodule"):
+                command(["git", "-C", str(apps), "submodule", "update", "--init", "--depth", "1", "--", descriptor["sourceDir"]], apps, "submodule")
+                exists = (apps / descriptor["sourceDir"] / ".git").exists()
+            else:
+                exists = source_location(apps, descriptor).is_file()
+            if not exists:
                 raise ValueError(f"当前仓库中没有 {descriptor['name']}。请检查下载日志或选择标准 gpu-app-collection 仓库。")
         emit("log", channel="download", text="已下载：" + ", ".join(identifiers) + "\n")
 
