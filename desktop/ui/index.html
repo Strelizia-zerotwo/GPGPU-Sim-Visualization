@@ -160,6 +160,19 @@
             </div>
             <button class="secondary" id="auto-detect">重新自动检测</button>
           </div>
+          <section class="panel storage-panel" aria-labelledby="storage-title">
+            <div class="panel-heading"><div><h2 id="storage-title">存储与缓存</h2></div><button class="secondary" id="open-storage">打开数据文件夹</button></div>
+            <div class="storage-body">
+              <p class="helper">画布、GPU 草稿、软件设置、实验记录索引和界面缓存保存在这里。实验日志及下载的源码使用下方各自的目录。</p>
+              <dl class="storage-locations"><div><dt>当前数据与缓存</dt><dd id="storage-current">正在读取…</dd></div><div><dt>软件临时文件</dt><dd id="storage-temp">—</dd></div><div><dt>程序文件</dt><dd id="storage-runtime">—</dd></div></dl>
+              <p id="storage-runtime-hint" class="helper"></p>
+              <label for="storage-target">新的数据与缓存文件夹</label>
+              <div class="storage-path-row"><input id="storage-target" placeholder="选择新的空文件夹，例如 E:\GPGPU-Studio-Data" autocomplete="off"><button class="secondary" id="choose-storage">选择文件夹</button></div>
+              <div class="storage-actions"><p class="helper">迁移会保留已有画布和设置，校验文件后清理旧位置，并自动重启软件。运行中的实验及下载结束后才能迁移。</p><button class="primary" id="move-storage">迁移并重启</button></div>
+              <p id="storage-status" class="helper" role="status"></p>
+              <details class="storage-details"><summary>位置设置保存在哪里？</summary><p class="helper">为了在下次启动时找到数据，只保留一个很小的位置配置文件；实际数据、缓存和软件临时文件使用你选择的目录。</p><code id="storage-config"></code></details>
+            </div>
+          </section>
           <div class="env-grid">
             <section class="panel">
               <div class="panel-heading">
@@ -173,21 +186,22 @@
                   Windows 使用 WSL；Linux 直接在本机执行。路径填写 Linux 路径。
                 </p>
                 <label for="sim-root">GPGPU-Sim 源码目录</label
-                ><input
+                ><div class="storage-path-row"><input
                   id="sim-root"
                   placeholder="留空自动检测，如 /home/user/projects/gpgpu-project/gpgpu-sim_distribution"
-                /><label for="apps-root">gpu-app-collection 目录</label
-                ><input
+                /><button type="button" class="secondary" data-browse-environment="simRoot">选择</button></div><label for="apps-root">gpu-app-collection 目录</label
+                ><div class="storage-path-row"><input
                   id="apps-root"
                   placeholder="留空使用模拟器同级的 gpu-app-collection"
-                /><label for="cuda-root">CUDA Toolkit 目录</label
+                /><button type="button" class="secondary" data-browse-environment="appsRoot">选择</button></div><label for="cuda-root">CUDA Toolkit 目录</label
                 ><input
                   id="cuda-root"
                   list="cuda-options"
                   placeholder="留空优先使用模拟器构建所用 CUDA"
                 /><datalist id="cuda-options"></datalist
                 ><label for="runs-root">实验保存目录</label
-                ><input id="runs-root" placeholder="留空自动使用 runs/studio" />
+                ><div class="storage-path-row"><input id="runs-root" placeholder="留空自动使用 runs/studio" /><button type="button" class="secondary" data-browse-environment="runsRoot">选择</button></div>
+                <p class="helper">可直接选择 E 盘等磁盘上的文件夹，软件会转换为所选 WSL 的路径。实验目录请勿含空格（当前模拟器限制）。保存后，后续实验写入新位置；历史结果仍从原路径读取。已有源码和 CUDA 安装不会自动搬动。</p>
                 <div class="env-form-actions">
                   <button type="submit" class="primary" id="inspect-env">
                     检测并保存环境</button

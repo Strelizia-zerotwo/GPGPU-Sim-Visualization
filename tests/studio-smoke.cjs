@@ -7,7 +7,7 @@ const fs=require('node:fs'),path=require('node:path'),net=require('node:net'),as
  const seed=JSON.parse(fs.readFileSync(path.join(seedReport.dataDir,'state.json'),'utf8'));
  fs.mkdirSync(dataDir,{recursive:true});fs.writeFileSync(path.join(dataDir,'state.json'),JSON.stringify(seed));
  const env={...process.env,GPGPU_STUDIO_DATA_DIR:dataDir};delete env.ELECTRON_RUN_AS_NODE;
- const portable=process.argv.includes('--portable'),mode=portable?'portable':'source';
+ const portable=process.argv.includes('--portable'),packaged=process.argv.includes('--packaged'),mode=portable?'portable':packaged?'packaged':'source';
  let app,browser,launcher,page;const errors=[];
  try{
   if(portable){
@@ -16,7 +16,7 @@ const fs=require('node:fs'),path=require('node:path'),net=require('node:net'),as
    const deadline=Date.now()+60000;
    while(true){try{if((await fetch(`http://127.0.0.1:${port}/json/version`)).ok)break;}catch{}if(Date.now()>deadline||launcher.exitCode!==null)throw Error('portable startup failed');await new Promise(r=>setTimeout(r,250));}
    browser=await chromium.connectOverCDP(`http://127.0.0.1:${port}`);page=browser.contexts()[0].pages()[0];
-  }else{app=await electron.launch({args:['.'],env});page=await app.firstWindow();await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(1440,960));}
+  }else{app=await electron.launch(packaged?{executablePath:path.resolve(`release/${version}/win-unpacked/GPGPU Studio.exe`),args:[],env}:{args:['.'],env});page=await app.firstWindow();await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(1440,960));}
   page.on('pageerror',e=>errors.push(e.message));
   await page.waitForFunction(()=>typeof state!=='undefined'&&state.info?.ready,null,{timeout:90000});
   async function capture(name){await page.evaluate(()=>document.querySelector('#toast').hidden=true);await page.screenshot({path:path.join(root,`studio-${name}-${mode}.png`),animations:'disabled'});}

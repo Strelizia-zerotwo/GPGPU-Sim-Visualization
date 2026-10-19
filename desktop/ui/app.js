@@ -23,6 +23,7 @@ const state = {
   fallbackBenchmarks: [],
   storeSelection: new Set(),
   maintenance: null,
+  storage: null,
 };
 const terminal = new Set([
   "completed",
@@ -601,6 +602,41 @@ $("environment-form").onsubmit = (event) => {
     runsRoot: $("runs-root").value,
   });
 };
+function renderStorage(info) {
+  state.storage = info;
+  $("storage-current").textContent = info.dataDir;
+  $("storage-temp").textContent = info.tempDir;
+  $("storage-runtime").textContent = info.runtimeDir;
+  $("storage-config").textContent = info.configFile;
+  $("storage-status").textContent = info.error || '';
+  $("storage-runtime-hint").textContent = info.selfExtracting
+    ? '当前为单文件自解压版，启动器仍会展开临时运行文件。建议使用新版 ZIP 目录版，解压到所选磁盘后直接运行。'
+    : '程序文件保存在软件所在位置。ZIP 目录版解压一次即可使用，移动整个软件文件夹即可更换程序位置。';
+}
+$("choose-storage").onclick = async () => {
+  try { const folder = await window.studio.chooseStorage(); if (folder) $("storage-target").value = folder; }
+  catch (error) { toast(error.message, true); }
+};
+$("open-storage").onclick = async () => {
+  try { const error = await window.studio.openStorage(); if (error) toast(error, true); }
+  catch (error) { toast(error.message, true); }
+};
+$("move-storage").onclick = async () => {
+  const directory = $("storage-target").value.trim();
+  if (!directory) return toast('请先选择新的空数据文件夹。', true);
+  $("move-storage").disabled = true; $("storage-status").textContent = '准备迁移，软件会在保存数据后重启…';
+  try { persistWorkbench(); await window.studio.relocateStorage(directory); }
+  catch (error) {
+    const message = error.message.replace(/^Error invoking remote method '[^']+': Error: /, '');
+    $("move-storage").disabled = false; $("storage-status").textContent = message; toast(message, true);
+  }
+};
+document.querySelectorAll('[data-browse-environment]').forEach(button => button.onclick = async () => {
+  try {
+    const folder = await window.studio.chooseEnvironmentFolder({ kind: button.dataset.browseEnvironment, distro: $("distro").value });
+    if (folder) $({ simRoot: 'sim-root', appsRoot: 'apps-root', runsRoot: 'runs-root' }[button.dataset.browseEnvironment]).value = folder;
+  } catch (error) { toast(error.message, true); }
+});
 $("install-help").onclick = () => showView("tutorial");
 $("launch").onclick = runAllCanvasEdges;
 $("job-table").onclick = (event) => {
@@ -792,6 +828,7 @@ renderPlan();
   try {
     const initial = await window.studio.bootstrap();
     state.settings = initial.settings;
+    renderStorage(initial.storage);
     state.jobs = initial.jobs;
     restoreCanvasJobLinks();
     state.fallbackBenchmarks = initial.benchmarksFallback || [];

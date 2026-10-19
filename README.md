@@ -2,9 +2,19 @@
 
 GPGPU-Sim 桌面实验管理工具。选择 Benchmark、规模和 GPU 配置，创建实验组合，使用多个独立进程同时运行，并查看日志、正确性检查和模拟统计。
 
-**下载 Windows 桌面版：[最新发布](https://github.com/Strelizia-zerotwo/GPGPU-Sim-Visualization/releases/latest) · [0.6.1 便携版 exe](https://github.com/Strelizia-zerotwo/GPGPU-Sim-Visualization/releases/download/v0.6.1/GPGPU-Studio-0.6.1-Windows-x64.exe)**
+**下载 Windows 桌面版：[最新发布](https://github.com/Strelizia-zerotwo/GPGPU-Sim-Visualization/releases/latest) · [0.6.2 目录版 ZIP](https://github.com/Strelizia-zerotwo/GPGPU-Sim-Visualization/releases/download/v0.6.2/GPGPU-Studio-0.6.2-Windows-x64.zip)**
 
-下载 exe 后直接运行，模拟实验仍需按照软件内的部署教程准备 WSL、CUDA 和 GPGPU-Sim。GitHub Releases 提供便携包和 SHA-256 校验文件；自动生成的 Source code 压缩包仅包含源码。`release/`、`node_modules/` 和实验输出属于本地生成内容，保持忽略，不加入 Git 提交。
+将 ZIP 完整解压到希望存放软件的磁盘，运行其中的 `GPGPU Studio.exe`。模拟实验仍需按照软件内的部署教程准备 WSL、CUDA 和 GPGPU-Sim。GitHub Releases 提供运行包和 SHA-256 校验文件；自动生成的 Source code 压缩包仅包含源码。`release/`、`node_modules/` 和实验输出属于本地生成内容，保持忽略，不加入 Git 提交。
+
+0.6.2 加入可选择的文件存储位置，Windows 发布包位于 `release/0.6.2/GPGPU-Studio-0.6.2-Windows-x64.zip`。
+
+- **界面数据与缓存**：进入「环境设置 → 存储与缓存」，选择新的空文件夹并点击「迁移并重启」。软件保存画布、GPU 草稿、设置和历史任务索引，退出后复制并逐文件校验，启用新位置后清理原目录。目标非空、路径重叠或复制 / 校验失败时保留原数据；实验、队列或下载部署未结束时阻止迁移。
+- **临时文件**：Electron 的会话数据、缓存、软件临时文件、崩溃记录和日志使用所选数据目录。只在默认应用数据位置保留很小的 `gpgpu-studio-storage.json`，用于下次启动定位数据。
+- **实验与源码**：实验、Benchmark 下载及模拟器源码路径增加原生文件夹选择按钮，Windows 路径自动转换成所选 WSL 的路径。保存环境后，后续实验使用新目录；旧实验仍按原路径读取，已有源码和 CUDA 不自动搬动。当前 GPGPU-Sim 的运行目录不能含空格，界面和后端会提前检查；此限制不影响界面数据与缓存目录。
+- **编译临时文件**：实验编译和运行的 `TMPDIR` 使用该实验下的 `tmp` 子目录，下载 / 部署任务的临时文件使用其操作日志目录下的 `tmp`。
+- **目录版发布**：从单文件自解压启动器改为 ZIP 目录版，解压一次直接运行，避免启动器每次在 Windows Temp 展开整套运行文件。旧版本遗留的自解压目录不属于界面数据目录，不会随此次数据迁移自动删除。
+
+验证：`npm test`、`npm run test:storage`；打包后使用 `node tests/storage-smoke.cjs --packaged`、`node tests/studio-smoke.cjs --packaged` 及 `node tests/studio-package.cjs`。存储验证使用隔离数据，覆盖 C: → E:、重启后画布及缓存保留、历史报告读取、运行中保护、目标覆盖保护和迁移前后的真实 GEMM。
 
 0.6.1 补全画布交互，Windows 便携包位于 `release/0.6.1/GPGPU-Studio-0.6.1-Windows-x64.exe`。
 

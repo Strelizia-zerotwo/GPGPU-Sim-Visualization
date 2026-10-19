@@ -167,6 +167,8 @@ def inspect_environment(settings):
     cuda = absolute_path(settings.get("cudaRoot") or built_cuda or (cuda_candidates[-1] if cuda_candidates else "/usr/local/cuda"))
     paths = {"simRoot": str(sim), "appsRoot": str(apps), "runsRoot": str(runs), "cudaRoot": str(cuda)}
     issues = []
+    if re.search(r"\s", str(runs)):
+        issues.append("当前 GPGPU-Sim 不支持含空格的实验目录，请选择例如 /mnt/e/GPGPU-Studio-Runs。")
     env = None
     version = "未检测到"
     supported = []
@@ -401,6 +403,9 @@ def run_job(request, cancel):
         prepared, adapter_patches = prepare_collection(prepared, descriptor)
     work = runs / identifier
     work.mkdir(parents=True, exist_ok=False)
+    temporary = work / "tmp"
+    temporary.mkdir()
+    env.update({"TMPDIR": str(temporary), "TMP": str(temporary), "TEMP": str(temporary)})
     # Each process gets a private complete copy of its profile and generated source.
     for entry in profile_folder.iterdir():
         if entry.is_file():
@@ -447,6 +452,7 @@ def run_job(request, cancel):
     manifest = {"id": identifier, "createdAt": utc_now(), "benchmark": benchmark, "size": size, "profileId": profile_id,
                 "cudaVersion": environment["cudaVersion"], "paths": paths, "simulator": environment["simulator"],
                 "applications": environment["applications"], "setupScript": setup, "compileCommand": args,
+                "temporaryDirectory": str(temporary),
                 "sourceSHA256": hash_file(source_path), "preparedSourceSHA256": hash_file(work / entry_file),
                 "configSHA256": hash_file(work / "gpgpusim.config"), "adapterVersion": 3, "clockMHz": clock_mhz,
                 "parameters": parameters, "effectiveDimensions": {m: parameters.get(m, size) for m in descriptor["macros"]},

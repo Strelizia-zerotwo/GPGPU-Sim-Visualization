@@ -33,6 +33,9 @@ def execute(request, cancel, emit, run_command, absolute_path, inspect_environme
     env = dict(os.environ)
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["PYTHONUNBUFFERED"] = "1"
+    temporary = log_root / "tmp"
+    temporary.mkdir()
+    env.update({"TMPDIR": str(temporary), "TMP": str(temporary), "TEMP": str(temporary)})
     deadline = time.monotonic() + (3600 if operation == "deploy" else 600)
     sequence = 0
     emit("prepared", workDir=str(log_root))

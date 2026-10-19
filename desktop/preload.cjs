@@ -1,6 +1,11 @@
 const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("studio", {
   bootstrap: () => ipcRenderer.invoke("studio:bootstrap"),
+  storage: () => ipcRenderer.invoke('studio:storage'),
+  chooseStorage: () => ipcRenderer.invoke('studio:choose-storage'),
+  relocateStorage: directory => ipcRenderer.invoke('studio:relocate-storage', directory),
+  openStorage: () => ipcRenderer.invoke('studio:open-storage'),
+  chooseEnvironmentFolder: options => ipcRenderer.invoke('studio:choose-environment-folder', options),
   inspect: (settings) => ipcRenderer.invoke("studio:inspect", settings),
   autoDetect: () => ipcRenderer.invoke("studio:auto-detect"),
   maintenance: (request) => ipcRenderer.invoke("studio:maintenance", request),

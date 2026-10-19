@@ -11,10 +11,32 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { promisify } = require("node:util");
 const { JobManager } = require("./runner.cjs");
+const { Storage } = require("./storage.cjs");
 const execute = promisify(execFile);
 
-if (process.env.GPGPU_STUDIO_DATA_DIR)
-  app.setPath("userData", path.resolve(process.env.GPGPU_STUDIO_DATA_DIR));
+let storage, storageStartupError, ownsInstance = false;
+try {
+  storage = new Storage({ defaultDir: app.getPath('userData'), overrideDir: process.env.GPGPU_STUDIO_DATA_DIR,
+    configFile: process.env.GPGPU_STUDIO_STORAGE_CONFIG, beforeCleanup: () => {
+      app.releaseSingleInstanceLock(); app.setPath('userData', storage.dataDir);
+      ownsInstance = app.requestSingleInstanceLock();
+      if (!ownsInstance) throw new Error('新数据目录正在被另一个软件实例使用。');
+    } });
+  app.setPath('userData', storage.dataDir);
+  ownsInstance = app.requestSingleInstanceLock();
+  if (ownsInstance) {
+    storage.initialize();
+    if (ownsInstance) {
+      app.setPath('sessionData', storage.dataDir);
+      const temporary = path.join(storage.dataDir, 'Temp');
+      fs.mkdirSync(temporary, { recursive: true });
+      app.setPath('temp', temporary);
+      app.setPath('crashDumps', path.join(storage.dataDir, 'CrashDumps'));
+      app.setAppLogsPath(path.join(storage.dataDir, 'Logs'));
+      process.env.TEMP = temporary; process.env.TMP = temporary; process.env.TMPDIR = temporary;
+    }
+  }
+} catch (error) { storageStartupError = error; }
 let window;
 let manager;
 let state;
@@ -23,6 +45,7 @@ let closing = false;
 let persistTimer;
 let maintenance = null;
 let maintenanceWorker = null;
+let storageChanging = false;
 const backendPaths = new Map();
 
 const defaultSettings = {
@@ -215,6 +238,7 @@ function cleanSettings(settings) {
 }
 
 async function inspectSelected(settings) {
+  if (storageChanging) throw new Error('存储位置正在切换，请等待软件重启。');
   const selected = cleanSettings(settings);
   const distros = await distributions();
   if (!distros.some((d) => d.name === selected.distro))
@@ -230,6 +254,7 @@ async function inspectSelected(settings) {
 }
 
 async function autoDetect() {
+  if (storageChanging) throw new Error('存储位置正在切换，请等待软件重启。');
   environmentInfo = null;
   const distros = await distributions();
   if (!distros.length)
@@ -284,6 +309,7 @@ async function autoDetect() {
 }
 
 async function startMaintenance(request) {
+  if (storageChanging) throw new Error('存储位置正在切换，请等待软件重启。');
   if (maintenanceWorker)
     throw new Error("已有下载或部署任务正在执行，请等待完成或取消。");
   if (!["deploy", "install-benchmarks", "add-custom"].includes(request.op))
@@ -339,6 +365,8 @@ async function startMaintenance(request) {
 }
 
 app.whenReady().then(() => {
+  if (storageStartupError) { dialog.showErrorBox('存储设置读取失败', storageStartupError.message); app.quit(); return; }
+  if (!ownsInstance) { app.quit(); return; }
   try {
     state = JSON.parse(fs.readFileSync(statePath(), "utf8"));
   } catch {
@@ -372,10 +400,45 @@ app.whenReady().then(() => {
       platform: process.platform,
       version: app.getVersion(),
       maintenance,
+      storage: storageDescription(),
       benchmarksFallback: ["polybench.json", "collections.json"].flatMap(file => Object.entries(
         JSON.parse(fs.readFileSync(app.isPackaged ? path.join(process.resourcesPath, "backend", file) : path.join(__dirname, "../backend", file), "utf8"))
       ).map(([id, descriptor]) => ({ ...descriptor, id, suite: descriptor.suite || "PolyBench/GPU", runnable: descriptor.runnable !== false, available: false, downloaded: false }))),
     };
+  });
+  ipcMain.handle('studio:storage', () => storageDescription());
+  ipcMain.handle('studio:choose-storage', async () => {
+    const result = await dialog.showOpenDialog(window, { title: '选择新的空数据文件夹', defaultPath: storage.dataDir,
+      properties: ['openDirectory', 'createDirectory'] });
+    return result.canceled ? null : result.filePaths[0];
+  });
+  ipcMain.handle('studio:open-storage', () => shell.openPath(storage.dataDir));
+  ipcMain.handle('studio:relocate-storage', async (_, directory) => {
+    if (storageChanging) throw new Error('存储位置正在切换。');
+    if (manager.active.size || manager.jobs.some(job => job.status === 'queued') || maintenanceWorker)
+      throw new Error('请先结束正在运行、等待中的实验和下载部署任务，再迁移存储位置。');
+    storageChanging = true;
+    try {
+      persist();
+      storage.prepare(directory);
+      window.webContents.session.flushStorageData();
+      app.relaunch(); app.quit();
+      return { restarting: true };
+    } catch (error) { storageChanging = false; throw error; }
+  });
+  ipcMain.handle('studio:choose-environment-folder', async (_, options) => {
+    const names = { simRoot: 'GPGPU-Sim 源码目录', appsRoot: 'Benchmark 下载目录', runsRoot: '实验结果目录' };
+    if (!names[options?.kind]) throw new Error('不支持的目录类型。');
+    const result = await dialog.showOpenDialog(window, { title: '选择' + names[options.kind], properties: ['openDirectory', 'createDirectory'] });
+    if (result.canceled) return null;
+    if (process.platform === 'linux') return result.filePaths[0];
+    if (!options.distro) throw new Error('请先选择 WSL 发行版。');
+    const converted = await execute('wsl.exe', ['-d', options.distro, '--exec', 'wslpath', '-u', result.filePaths[0]],
+      { windowsHide: true, encoding: 'utf8', timeout: 20000 });
+    const linux = cleanWSL(converted.stdout);
+    if (!linux.startsWith('/')) throw new Error('无法把所选文件夹转换为 WSL 路径。');
+    if (options.kind === 'runsRoot' && /\s/.test(linux)) throw new Error('当前 GPGPU-Sim 不支持含空格的实验目录，请选择例如 E:\\GPGPU-Studio-Runs。');
+    return linux;
   });
   ipcMain.handle("studio:inspect", async (_, settings) => {
     environmentInfo = null;
@@ -401,6 +464,7 @@ app.whenReady().then(() => {
       clipboard.writeText(text);
   });
   ipcMain.handle("studio:submit", (_, spec) => {
+    if (storageChanging) throw new Error('存储位置正在切换，请等待软件重启。');
     if (maintenanceWorker && maintenance.op === "deploy")
       throw new Error("请等待模拟器部署完成。");
     if (!environmentInfo?.ready) throw new Error("请先在环境页面完成检测。");
@@ -559,4 +623,10 @@ app.whenReady().then(() => {
     }
   });
 });
+function storageDescription() {
+  return { dataDir: storage.dataDir, cacheDir: path.join(storage.dataDir, 'Cache'), tempDir: app.getPath('temp'),
+    configFile: storage.configFile, runtimeDir: path.dirname(process.execPath),
+    selfExtracting: Boolean(process.env.PORTABLE_EXECUTABLE_FILE), error: storage.error };
+}
+app.on('second-instance', () => { if (window) { if (window.isMinimized()) window.restore(); window.focus(); } });
 app.on("window-all-closed", () => app.quit());
